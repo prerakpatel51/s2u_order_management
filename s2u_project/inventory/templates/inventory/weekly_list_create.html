@@ -1,0 +1,46 @@
+{% extends "inventory/base.html" %}
+
+{% block title %}Create Weekly Order List · S2U Operations{% endblock %}
+
+{% block extra_head %}
+<style>
+    body {
+        background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(255, 255, 255, 0.9));
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-sm py-5">
+    <div class="row justify-content-center">
+        <div class="col-xl-6 col-lg-7 col-md-8">
+            <div class="card shadow-lg border-0">
+                <div class="card-body p-4 p-lg-5">
+                    <h1 class="h4 fw-bold text-primary mb-3"><i class="bi bi-clipboard-check me-2"></i>Create Weekly Order List</h1>
+                    <p class="text-secondary mb-4">Choose the store and the week you are planning for to start building a new order list.</p>
+                    <form method="post" class="vstack gap-3">
+                        {% csrf_token %}
+                        <div>
+                            <label for="store" class="form-label fw-semibold">Store</label>
+                            <select id="store" name="store" class="form-select form-select-lg" required>
+                                <option value="" disabled selected>Choose a store...</option>
+                                {% for store in stores %}
+                                    <option value="{{ store.id }}">{{ store.name }} ({{ store.number }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label for="target_date" class="form-label fw-semibold">Week of</label>
+                            <input type="date" id="target_date" name="target_date" class="form-control form-control-lg" value="{{ default_date }}" required>
+                            <div class="form-text">Select the Monday of the week you are planning for.</div>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-lg mt-3">
+                            <i class="bi bi-arrow-right-circle me-2"></i>Create List
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,1256 @@
+{% extends "inventory/base.html" %}
+
+{% block title %}Weekly List · {{ order_list.store.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    body {
+        background: radial-gradient(circle at 25% 10%, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0.03) 50%, #ffffff 85%);
+    }
+    .list-meta-card {
+        border: none;
+        border-radius: 18px;
+        box-shadow: 0 24px 40px -30px rgba(37, 99, 235, 0.55);
+    }
+    .suggestion-box {
+        position: absolute;
+        top: calc(100% + 0.5rem);
+        left: 0;
+        right: 0;
+        z-index: 40;
+        max-height: 320px;
+        overflow-y: auto;
+    }
+    .suggestion-box.hidden {
+        display: none;
+    }
+    .table thead th {
+        white-space: nowrap;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.05em;
+    }
+    /* Allow wrapping for specific narrow columns */
+    .table thead th.wrap-header {
+        white-space: normal;
+        line-height: 1.2;
+    }
+    .table tbody td,
+    .table tbody th {
+        vertical-align: middle;
+    }
+    /* Sticky + layout polish */
+    #weekly-items-table{--w-num:84px;--w-name:240px;--w-barcode:140px;--w-supplier:120px;--w-action:84px}
+    /* Smaller font for product name */
+    #weekly-items-table tbody td:nth-child(2) { font-size: 0.875rem; }
+    /* Sticky header */
+    #weekly-items-table thead tr:last-child th{position:sticky;top:0;background:#fff;z-index:5;box-shadow:0 -1px 0 #e9ecef inset,0 2px 0 rgba(0,0,0,.02)}
+    /* Sticky left block (first 2 cols only) */
+    #weekly-items-table thead th:nth-child(1),#weekly-items-table tbody tr>*:nth-child(1){position:sticky;left:0;z-index:6;background:#fff;min-width:var(--w-num);max-width:var(--w-num)}
+    #weekly-items-table thead th:nth-child(2),#weekly-items-table tbody tr>*:nth-child(2){position:sticky;left:var(--w-num);z-index:6;background:#fff;min-width:var(--w-name);max-width:var(--w-name);box-shadow:6px 0 6px -6px rgba(0,0,0,.08)}
+    /* Non-sticky Barcode and Supplier to avoid overlap */
+    #weekly-items-table thead th:nth-child(3),#weekly-items-table tbody tr>*:nth-child(3){position:static;left:auto;z-index:auto;background:inherit;min-width:var(--w-barcode);max-width:var(--w-barcode)}
+    #weekly-items-table thead th:nth-child(4),#weekly-items-table tbody tr>*:nth-child(4){position:static;left:auto;z-index:auto;background:inherit;min-width:var(--w-supplier);max-width:var(--w-supplier)}
+    /* Sticky right action column */
+    #weekly-items-table thead th.action-col,#weekly-items-table tbody td.action-cell{position:sticky;right:0;z-index:4;background:#fff;min-width:var(--w-action);box-shadow:-6px 0 6px -6px rgba(0,0,0,.08)}
+    /* Truncation for text-heavy cols */
+    #weekly-items-table td.truncate,#weekly-items-table th.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    /* Divider to mark Other Stores group */
+    #weekly-items-table th.other-stock-col.store-start{border-left:2px solid #e9ecef}
+    #weekly-items-table td.other-stock.store-start{border-left:2px solid #f0f2f5}
+    /* Light column tints per store (6-color cycle) - brighter colors */
+    #weekly-items-table th.sc-0, #weekly-items-table td.sc-0 { background: #e3f2fd; } /* Brighter blue */
+    #weekly-items-table th.sc-1, #weekly-items-table td.sc-1 { background: #e8f5e9; } /* Brighter green */
+    #weekly-items-table th.sc-2, #weekly-items-table td.sc-2 { background: #fff3e0; } /* Brighter orange */
+    #weekly-items-table th.sc-3, #weekly-items-table td.sc-3 { background: #f3e5f5; } /* Brighter purple */
+    #weekly-items-table th.sc-4, #weekly-items-table td.sc-4 { background: #e0f2f1; } /* Brighter teal */
+    #weekly-items-table th.sc-5, #weekly-items-table td.sc-5 { background: #fce4ec; } /* Brighter pink */
+    /* Current store subtle tint */
+    #weekly-items-table th.sc-current, #weekly-items-table td.sc-current { background: #eef6ff; }
+    /* Admin column colors - Joe, BT, SQW */
+    #weekly-items-table th.col-joe, #weekly-items-table td.col-joe { background: #fff4e6; } /* Light orange */
+    #weekly-items-table th.col-bt, #weekly-items-table td.col-bt { background: #e8f5e9; } /* Light green */
+    #weekly-items-table th.col-sqw, #weekly-items-table td.col-sqw { background: #f3e5f5; } /* Light purple */
+    /* Brighter column borders */
+    #weekly-items-table th, #weekly-items-table td {
+        border-left: 1px solid #cbd5e1;
+        border-right: 1px solid #cbd5e1;
+    }
+    /* Supplier initials chip */
+    .sup-badge{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:#eef2ff;color:#1d4ed8;font-weight:700;text-transform:uppercase;font-size:.75rem}
+    /* Center supplier header and cell content */
+    #weekly-items-table thead tr:last-child th:nth-child(4){text-align:center}
+    #weekly-items-table tbody td:nth-child(4){text-align:center}
+    /* Consistent numeric alignment and compact second row */
+    #weekly-items-table td.numeric, #weekly-items-table th.numeric { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    /* Legacy second-row styles removed in new compact layout */
+    .quantity-input {
+        max-width: 140px;
+        min-width: 100px;
+    }
+    /* Narrower admin numeric inputs */
+    input.joe,
+    input.bt,
+    input.sqw {
+        max-width: 70px;
+        min-width: 60px;
+    }
+    input.transfer-bottles {
+        max-width: 70px;
+        min-width: 60px;
+    }
+    select.transfer-from {
+        max-width: 90px;
+        min-width: 80px;
+    }
+    /* Hide # (1st) and Barcode (3rd) columns when toggled (apply to last header row only) */
+    #weekly-items-table.barcode-hidden thead tr:last-child th:nth-child(1),
+    #weekly-items-table.barcode-hidden tbody tr > *:nth-child(1),
+    #weekly-items-table.barcode-hidden thead tr:last-child th:nth-child(3),
+    #weekly-items-table.barcode-hidden tbody tr > *:nth-child(3) { display: none; }
+    /* When # is hidden, shift Product Name sticky to the far left */
+    #weekly-items-table.barcode-hidden thead tr:last-child th:nth-child(2),
+    #weekly-items-table.barcode-hidden tbody tr > *:nth-child(2) { left: 0 !important; box-shadow: 6px 0 6px -6px rgba(0,0,0,.08); }
+
+    /* Hide cross-store stock columns when toggled */
+    #weekly-items-table.other-hidden thead th.other-stock-col,
+    #weekly-items-table.other-hidden tbody td.other-stock {
+        display: none;
+    }
+
+    /* Transfer item highlighting for finalized lists */
+    #weekly-items-table tbody tr.transfer-highlight {
+        background: linear-gradient(90deg, #fff3cd 0%, #fffbf0 100%) !important;
+        border-left: 4px solid #ffc107 !important;
+        font-weight: 500;
+    }
+    #weekly-items-table tbody tr.transfer-highlight:hover {
+        background: linear-gradient(90deg, #ffecb5 0%, #fff9e6 100%) !important;
+    }
+    /* Override column colors for transfer-highlighted rows */
+    #weekly-items-table tbody tr.transfer-highlight td {
+        background: transparent !important;
+    }
+
+    @media (max-width: 992px) {
+        .quantity-input { max-width: 180px; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4 py-lg-5">
+    <div class="row g-4">
+        <div class="col-12">
+            <div class="card list-meta-card">
+                <div class="card-body p-4 p-lg-5">
+                    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-4">
+                        <div>
+                            {% if order_list.finalized_at %}
+                                <span class="badge bg-success-subtle text-success mb-3">Finalized</span>
+                            {% else %}
+                                <span class="badge bg-primary-subtle text-primary mb-3">Weekly List</span>
+                            {% endif %}
+                            <h1 class="h3 fw-bold text-primary mb-1">{{ order_list.store.name }}</h1>
+                            <p class="text-secondary mb-0">Week of <strong>{{ order_list.target_date|date:"F j, Y" }}</strong></p>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <a class="btn btn-outline-secondary" href="{% url 'inventory:weekly_list_create' %}">
+                                <i class="bi bi-plus-circle me-1"></i>Create Another List
+                            </a>
+                            <a class="btn btn-outline-success" href="{% url 'inventory:weekly_export_excel' order_list.id %}" target="_blank">
+                                <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
+                            </a>
+                            {% if is_admin %}
+                            <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#filterExportModal">
+                                <i class="bi bi-funnel me-1"></i>Filter & Export
+                            </button>
+                            <button type="button" class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#exportModal" data-export-type="joe">
+                                <i class="bi bi-download me-1"></i>Export Joe
+                            </button>
+                            <button type="button" class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#exportModal" data-export-type="bt">
+                                <i class="bi bi-download me-1"></i>Export BT
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#exportModal" data-export-type="sqw">
+                                <i class="bi bi-download me-1"></i>Export SQW
+                            </button>
+                            <button type="button" class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#exportModal" data-export-type="transfer">
+                                <i class="bi bi-download me-1"></i>Export Transfer
+                            </button>
+                            {% endif %}
+                            {% if not order_list.finalized_at %}
+                            <button type="button" id="refresh-all" class="btn btn-outline-success">
+                                <span class="spinner-border spinner-border-sm me-2 d-none" role="status"></span>
+                                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                            </button>
+                            {% endif %}
+                            {% if request.user.is_staff and not order_list.finalized_at %}
+                            <form method="post" action="{% url 'inventory:weekly_finalize_list' order_list.id %}">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-primary"><i class="bi bi-check2-circle me-1"></i>Finalize</button>
+                            </form>
+                            {% endif %}
+                            {% if request.user.is_staff and order_list.finalized_at %}
+                            <form method="post" action="{% url 'inventory:weekly_unfinalize_list' order_list.id %}">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-warning"><i class="bi bi-arrow-counterclockwise me-1"></i>Unfinalize</button>
+                            </form>
+                            {% endif %}
+                            {% if request.user.is_staff %}
+                            <form method="post" action="{% url 'inventory:weekly_delete_list' order_list.id %}" onsubmit="return confirm('Delete this list? This cannot be undone.');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-outline-secondary"><i class="bi bi-trash me-1"></i>Delete</button>
+                            </form>
+                            {% endif %}
+                            {% if is_admin %}
+                            <div class="form-check form-switch ms-2">
+                                <input class="form-check-input" type="checkbox" id="toggle-hide-barcode">
+                                <label class="form-check-label small" for="toggle-hide-barcode">Hide # &amp; Barcode</label>
+                            </div>
+                            <div class="form-check form-switch ms-2">
+                                <input class="form-check-input" type="checkbox" id="toggle-hide-others">
+                                <label class="form-check-label small" for="toggle-hide-others">Hide Other Stores</label>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if can_edit %}
+                        <div class="mt-4">
+                            <label for="product-query" class="form-label fw-semibold text-uppercase small text-secondary">Add Products</label>
+                            <div class="position-relative">
+                                <div class="input-group input-group-lg shadow-sm">
+                                    <span class="input-group-text bg-white border-end-0"><i class="bi bi-upc-scan"></i></span>
+                                    <input type="text" id="product-query" class="form-control border-start-0" placeholder="Scan a barcode or type a product name">
+                                </div>
+                                <div id="weekly-suggestion-box" class="suggestion-box hidden">
+                                    <div class="list-group shadow" id="weekly-suggestion-list"></div>
+                                </div>
+                            </div>
+                            <div class="form-text">Scan a barcode repeatedly to increase the on-shelf count automatically.</div>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-warning mt-4"><i class="bi bi-lock me-2"></i>This list has been finalized. Editing is disabled for employees.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter & Export modal -->
+        <div class="modal fade" id="filterExportModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-funnel me-2"></i>Filter & Export</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="d-flex flex-wrap align-items-end gap-3 mb-3">
+                            <div>
+                                <label class="form-label small text-muted">Supplier</label>
+                                <select id="filter-supplier" class="form-select form-select-sm" style="min-width:240px"></select>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="has-transfer" value="transfer_bottles">
+                                <label class="form-check-label small" for="has-transfer">Has Transfer Bottles</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="has-joe" value="joe">
+                                <label class="form-check-label small" for="has-joe">Has Joe</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="has-bt" value="bt">
+                                <label class="form-check-label small" for="has-bt">Has BT</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="has-sqw" value="sqw">
+                                <label class="form-check-label small" for="has-sqw">Has SQW</label>
+                            </div>
+                            <div class="ms-auto d-flex gap-2">
+                                <button class="btn btn-outline-primary btn-sm" id="apply-filter"><i class="bi bi-funnel me-1"></i>Apply</button>
+                                <button class="btn btn-outline-secondary btn-sm" id="clear-filter">Clear</button>
+                            </div>
+                        </div>
+
+                        <div class="row g-3 align-items-start">
+                            <div class="col-lg-8">
+                                <div>
+                                    <div class="fw-semibold mb-2">Columns to Export</div>
+                                    <div class="row g-2 small">
+                                        <div class="col-6 col-md-4">
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-num" type="checkbox" data-key="product_number" checked><label class="form-check-label" for="c-num">Product #</label></div>
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-name" type="checkbox" data-key="product_name" checked><label class="form-check-label" for="c-name">Product Name</label></div>
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-barcode" type="checkbox" data-key="barcode"><label class="form-check-label" for="c-barcode">Barcode</label></div>
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-supplier" type="checkbox" data-key="supplier" checked><label class="form-check-label" for="c-supplier">Supplier</label></div>
+                                        </div>
+                                        <div class="col-6 col-md-4">
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-sys" type="checkbox" data-key="system_stock" checked><label class="form-check-label" for="c-sys">System Stock</label></div>
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-on" type="checkbox" data-key="on_shelf" checked><label class="form-check-label" for="c-on">On Shelf</label></div>
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-needed" type="checkbox" data-key="monthly_needed" checked><label class="form-check-label" for="c-needed">Monthly Needed</label></div>
+                                        </div>
+                                        <div class="col-12 col-md-4">
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-tfrom" type="checkbox" data-key="transfer_from"><label class="form-check-label" for="c-tfrom">Transfer From</label></div>
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-tbot" type="checkbox" data-key="transfer_bottles"><label class="form-check-label" for="c-tbot">Transfer Bottles</label></div>
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-joe" type="checkbox" data-key="joe"><label class="form-check-label" for="c-joe">Joe</label></div>
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-bt" type="checkbox" data-key="bt"><label class="form-check-label" for="c-bt">BT</label></div>
+                                            <div class="form-check"><input class="form-check-input exp-col" id="c-sqw" type="checkbox" data-key="sqw"><label class="form-check-label" for="c-sqw">SQW</label></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-4">
+                                <div class="fw-semibold mb-2">Other Stores in Export</div>
+                                <div class="d-flex flex-wrap gap-2 small" id="export-other-stores"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <form id="export-excel-form" method="post" action="{% url 'inventory:weekly_export_excel_custom' order_list.id %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="payload" id="export-excel-payload">
+                            <button type="submit" class="btn btn-success"><i class="bi bi-file-earmark-excel me-1"></i>Export Excel</button>
+                        </form>
+                        <form id="export-pdf-form" method="post" action="{% url 'inventory:weekly_export_pdf_custom' order_list.id %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="payload" id="export-pdf-payload">
+                            <button type="submit" class="btn btn-danger"><i class="bi bi-file-earmark-pdf me-1"></i>Export PDF</button>
+                        </form>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Export Modal (Joe/BT/SQW/Transfer) -->
+        <div class="modal fade" id="exportModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-download me-2"></i>Export <span id="export-type-title"></span></h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="text-muted mb-3">Choose the format for your export:</p>
+                        <div class="d-grid gap-3">
+                            <button type="button" class="btn btn-lg btn-outline-success export-format-btn" data-format="excel">
+                                <i class="bi bi-file-earmark-excel me-2"></i>Export to Excel
+                            </button>
+                            <button type="button" class="btn btn-lg btn-outline-danger export-format-btn" data-format="pdf">
+                                <i class="bi bi-file-earmark-pdf me-2"></i>Export to PDF
+                            </button>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div id="weekly-feedback" class="alert alert-light border-start border-4 border-primary-subtle shadow-sm" role="alert">
+                <i class="bi bi-info-circle me-2 text-primary"></i>Start scanning to build the list. System stock reflects the current Korona quantity for {{ order_list.store.name }}.
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-striped table-sm align-middle mb-0" id="weekly-items-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th scope="col">#</th>
+                                    <th scope="col">Product Name</th>
+                                    <th scope="col">Barcode</th>
+                                    <th scope="col">Sup</th>
+                                    <th scope="col" class="text-center sc-current wrap-header">System<br>Stock</th>
+                                    <th scope="col" class="text-center sc-current">On Shelf</th>
+                                    {% if is_admin %}
+                                    {% for st in other_stores %}
+                                    <th scope="col" class="text-center other-stock-col numeric {% if forloop.first %}store-start{% endif %} {% cycle 'sc-0' 'sc-1' 'sc-2' 'sc-3' 'sc-4' 'sc-5' %}" title="{{ st.name }}">{{ st.number }}</th>
+                                    {% endfor %}
+                                    {% endif %}
+                                    {% if show_admin_cols %}
+                                    <th scope="col" class="text-center wrap-header">Transfer<br>From</th>
+                                    <th scope="col" class="text-center wrap-header">Transfer<br>Bottles</th>
+                                    <th scope="col" class="text-center col-joe">Joe</th>
+                                    <th scope="col" class="text-center col-bt">BT</th>
+                                    <th scope="col" class="text-center col-sqw">SQW</th>
+                                    {% endif %}
+                                    <th scope="col" class="text-center action-col">Remove</th>
+                                </tr>
+                            </thead>
+                            <tbody id="weekly-items-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="weekly-items-empty" class="p-4 text-center text-muted">
+                        <i class="bi bi-archive"></i> No products added yet. Scan a barcode or start typing above.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script id="weekly-items-data" type="application/json">{{ items_json|safe }}</script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+    const listId = {{ order_list.id }};
+    const canEdit = {{ can_edit|yesno:'true,false' }};
+    const isAdmin = {{ is_admin|yesno:'true,false' }};
+    const showAdminCols = {{ show_admin_cols|yesno:'true,false' }};
+    const stores = JSON.parse('{{ stores_json|escapejs }}');
+    const otherStores = JSON.parse('{{ other_stores_json|escapejs }}');
+    const storeId = {{ order_list.store.id }};
+    const queryInput = document.getElementById('product-query');
+    const suggestionBox = document.getElementById('weekly-suggestion-box');
+    const suggestionList = document.getElementById('weekly-suggestion-list');
+    const feedback = document.getElementById('weekly-feedback');
+    const tableBody = document.getElementById('weekly-items-body');
+    const tableWrapper = document.getElementById('weekly-items-table');
+    const emptyState = document.getElementById('weekly-items-empty');
+    const refreshButton = document.getElementById('refresh-products');
+    const refreshSpinner = refreshButton ? refreshButton.querySelector('.spinner-border') : null;
+    const hideBarcodeToggle = document.getElementById('toggle-hide-barcode');
+    const hideOthersToggle = document.getElementById('toggle-hide-others');
+
+    let debounceTimer = null;
+    const inputTimers = new Map(); // per-field debounce timers for autosave
+    let highlighted = -1;
+    let suggestions = [];
+    let lastQuery = '';
+    let tooltipInstances = [];
+
+    const items = new Map(JSON.parse(document.getElementById('weekly-items-data').textContent));
+    const suppliers = JSON.parse('{{ suppliers_json|escapejs }}');
+
+    function escapeAttr(value) {
+        return (value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function formatQuantity(value) {
+        const numeric = value || value === 0 ? Number(value) : 0;
+        return numeric.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function showFeedback(kind, message) {
+        const classes = {
+            info: 'alert-light border-primary-subtle text-primary',
+            success: 'alert-success border-success text-success',
+            danger: 'alert-danger border-danger text-danger'
+        };
+        feedback.className = 'alert shadow-sm ' + (classes[kind] || classes.info) + ' border-start border-4';
+        feedback.innerHTML = message;
+    }
+
+    function refreshTooltips() {
+        tooltipInstances.forEach((instance) => instance.dispose());
+        tooltipInstances = Array.from(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(
+            (el) => new bootstrap.Tooltip(el)
+        );
+    }
+
+    function renderTable() {
+        if (items.size === 0) {
+            tableBody.innerHTML = '';
+            emptyState.classList.remove('d-none');
+            tableWrapper.classList.add('d-none');
+            refreshTooltips();
+            return;
+        }
+
+        emptyState.classList.add('d-none');
+        tableWrapper.classList.remove('d-none');
+
+        // Apply client-side filter
+        const supplierSel = (document.getElementById('filter-supplier').value || '').trim();
+        const hasKeys = ['transfer_bottles','joe','bt','sqw'].filter(k => document.getElementById('has-' + (k === 'transfer_bottles' ? 'transfer' : k)).checked);
+
+        const filtered = Array.from(items.values()).filter((item) => {
+            if (supplierSel && supplierSel !== 'ALL') {
+                const sup = (item.supplier_name || '—');
+                if (sup !== supplierSel) return false;
+            }
+            for (const k of hasKeys) {
+                if (!item[k] || Number(item[k]) <= 0) return false;
+            }
+            return true;
+        });
+
+        const rows = filtered.map((item) => {
+            const systemStock = formatQuantity(item.system_stock);
+            const monthlySales = item.monthly_sales || 0;
+            const monthlySalesDisplay = monthlySales > 0 ? `<div class="small text-primary fw-semibold">${monthlySales}/mo</div>` : '';
+
+            const otherStoreCells = otherStores.map((st, idx) => {
+                const stockVal = (item.other_stocks && (st.id in item.other_stocks)) ? formatQuantity(item.other_stocks[st.id]) : '—';
+                const storeSales = (item.other_monthly_sales && (st.id in item.other_monthly_sales)) ? item.other_monthly_sales[st.id] : 0;
+                const storeSalesDisplay = storeSales > 0 ? `<div class="small text-primary fw-semibold">${storeSales}/mo</div>` : '';
+                const start = idx === 0 ? ' store-start' : '';
+                const hue = ` sc-${idx % 6}`;
+                return `<td class=\"text-center other-stock numeric${start}${hue}\"><div>${stockVal}</div>${storeSalesDisplay}</td>`;
+            }).join('');
+
+            // Supplier initials chip
+            const supFull = (item.supplier_name || '—');
+            function makeInitials(name){
+                if(!name||name==='—') return '—';
+                const words=(name.replace(/&/g,' ').replace(/\s+/g,' ').trim()).split(' ')
+                    .filter(w=>!['and','of','the','co.','co','llc','inc','wine','spirits','beverage','beverages'].includes(w.toLowerCase()));
+                const letters = (words.slice(0,3).map(w=>w[0]) || ['—']).join('').toUpperCase();
+                return letters.length?letters:'—';
+            }
+            const supAbbr = makeInitials(supFull);
+
+            const adminCells = showAdminCols ? `
+                <td class="text-center">
+                    ${isAdmin ? `
+                        <select class="form-select form-select-sm transfer-from">
+                            <option value="">—</option>
+                            ${stores.map(st => `<option value="${st.id}" title="${st.name}" ${item.transfer_from_id === st.id ? 'selected' : ''}>${st.number}</option>`).join('')}
+                        </select>
+                    ` : `${item.transfer_from_number || '—'}`}
+                </td>
+                <td class="text-center">${isAdmin ? `<input type="number" class="form-control form-control-sm text-center transfer-bottles" value="${item.transfer_bottles}" min="0">` : (item.transfer_bottles ?? 0)}</td>
+                <td class="text-center col-joe">${isAdmin ? `<input type="number" class="form-control form-control-sm text-center joe" value="${item.joe}" min="0">` : (item.joe ?? 0)}</td>
+                <td class="text-center col-bt">${isAdmin ? `<input type="number" class="form-control form-control-sm text-center bt" value="${item.bt}" min="0">` : (item.bt ?? 0)}</td>
+                <td class="text-center col-sqw">${isAdmin ? `<input type="number" class="form-control form-control-sm text-center sqw" value="${item.sqw}" min="0">` : (item.sqw ?? 0)}</td>
+            ` : '';
+
+            // Add highlight class for transfer items on finalized lists
+            const transferHighlight = item.has_transfer ? ' transfer-highlight' : '';
+
+            return `
+                <tr data-id="${item.id}" class="${transferHighlight}">
+                    <th scope="row" class="align-middle">${item.product_number}</th>
+                    <td class="align-middle truncate">${item.product_name}</td>
+                    <td class="align-middle truncate">${item.barcode || '—'}</td>
+                    <td class="align-middle"><span class="sup-badge" data-bs-toggle="tooltip" data-bs-placement="top" title="${supFull}">${supAbbr}</span></td>
+                    <td class=\"text-center numeric sc-current\"><div>${systemStock}</div>${monthlySalesDisplay}</td>
+                    <td class="text-center sc-current">
+                        <div class="input-group input-group-sm quantity-input mx-auto">
+                            <button class="btn btn-outline-secondary decrease" type="button" ${!canEdit ? 'disabled' : ''}>-</button>
+                            <input type="number" class="form-control text-center on-shelf" value="${item.on_shelf}" min="0" ${!canEdit ? 'disabled' : ''}>
+                            <button class="btn btn-outline-secondary increase" type="button" ${!canEdit ? 'disabled' : ''}>+</button>
+                        </div>
+                    </td>
+                    ${otherStoreCells}
+                    ${adminCells}
+                    <td class="text-center align-middle action-cell">
+                        <button type="button" class="btn btn-outline-danger btn-sm remove-item" ${!canEdit ? 'disabled' : ''}>
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        tableBody.innerHTML = rows;
+        refreshTooltips();
+    }
+
+    // Hide barcode column toggle (persists in localStorage)
+    const BARCODE_KEY = 'weekly.hideBarcode';
+    function applyBarcodePreference() {
+        const pref = localStorage.getItem(BARCODE_KEY) === '1';
+        hideBarcodeToggle.checked = pref;
+        const table = document.getElementById('weekly-items-table');
+        table.classList.toggle('barcode-hidden', pref);
+    }
+    if (hideBarcodeToggle) {
+        hideBarcodeToggle.addEventListener('change', () => {
+            localStorage.setItem(BARCODE_KEY, hideBarcodeToggle.checked ? '1' : '0');
+            applyBarcodePreference();
+        });
+    }
+
+    // Hide other stores columns (persists in localStorage). Default hide on small screens.
+    const OTHERS_KEY = 'weekly.hideOtherStocks';
+    function applyOtherStocksPreference() {
+        let pref = localStorage.getItem(OTHERS_KEY);
+        if (pref === null) {
+            pref = (window.innerWidth < 1200) ? '1' : '0';
+            localStorage.setItem(OTHERS_KEY, pref);
+        }
+        const hide = pref === '1';
+        if (hideOthersToggle) hideOthersToggle.checked = hide;
+        const table = document.getElementById('weekly-items-table');
+        table.classList.toggle('other-hidden', hide);
+    }
+    if (hideOthersToggle) {
+        hideOthersToggle.addEventListener('change', () => {
+            localStorage.setItem(OTHERS_KEY, hideOthersToggle.checked ? '1' : '0');
+            applyOtherStocksPreference();
+        });
+    }
+
+    // Init supplier filter options
+    (function initFilters() {
+        const sel = document.getElementById('filter-supplier');
+        if (!sel) return;
+        sel.innerHTML = `<option value="ALL">All Suppliers</option>` + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
+        document.getElementById('apply-filter').addEventListener('click', () => { renderTable(); });
+        document.getElementById('clear-filter').addEventListener('click', () => {
+            sel.value = 'ALL';
+            ['has-transfer','has-joe','has-bt','has-sqw'].forEach(id => { const el = document.getElementById(id); if (el) el.checked = false; });
+            renderTable();
+        });
+    })();
+
+    // Init export other stores checkboxes (unchecked by default)
+    (function initExportStores() {
+        const wrap = document.getElementById('export-other-stores');
+        if (!wrap) return;
+        wrap.innerHTML = otherStores.map(st => `
+            <div class="form-check">
+                <input class="form-check-input exp-other" type="checkbox" id="exp-os-${st.id}" data-id="${st.id}">
+                <label class="form-check-label" for="exp-os-${st.id}">${st.number}</label>
+            </div>
+        `).join('');
+    })();
+
+    function buildExportPayload() {
+        const columns = Array.from(document.querySelectorAll('.exp-col:checked')).map(el => el.dataset.key);
+        const supplierSel = (document.getElementById('filter-supplier').value || '').trim();
+        const hasKeys = [];
+        if (document.getElementById('has-transfer').checked) hasKeys.push('transfer_bottles');
+        if (document.getElementById('has-joe').checked) hasKeys.push('joe');
+        if (document.getElementById('has-bt').checked) hasKeys.push('bt');
+        if (document.getElementById('has-sqw').checked) hasKeys.push('sqw');
+        const otherStoresSel = Array.from(document.querySelectorAll('.exp-other:checked')).map(el => Number(el.dataset.id));
+        return JSON.stringify({ columns, supplier: supplierSel === 'ALL' ? null : supplierSel, has: hasKeys, other_stores: otherStoresSel });
+    }
+
+    // Hook export forms
+    (function initExportForms() {
+        const excelPayload = document.getElementById('export-excel-payload');
+        const pdfPayload = document.getElementById('export-pdf-payload');
+        const excelForm = document.getElementById('export-excel-form');
+        const pdfForm = document.getElementById('export-pdf-form');
+        if (excelForm) {
+            excelForm.addEventListener('submit', () => { excelPayload.value = buildExportPayload(); });
+        }
+        if (pdfForm) {
+            pdfForm.addEventListener('submit', () => { pdfPayload.value = buildExportPayload(); });
+        }
+    })();
+
+    function hideSuggestions() {
+        // Hide and fully reset suggestion state so stale results
+        // from a previous query cannot affect the next scan.
+        suggestionBox.classList.add('hidden');
+        suggestionList.innerHTML = '';
+        suggestions = [];
+        highlighted = -1;
+        // Invalidate any in-flight or pending searches
+        lastQuery = '';
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
+    }
+
+    function highlightSuggestion(index) {
+        highlighted = index;
+        const itemsEls = suggestionList.querySelectorAll('.list-group-item');
+        itemsEls.forEach((el, idx) => {
+            el.classList.toggle('active', idx === highlighted);
+            if (idx === highlighted) {
+                el.scrollIntoView({ block: 'nearest' });
+            }
+        });
+    }
+
+    async function fetchSuggestions(query) {
+        if (!query) {
+            hideSuggestions();
+            showFeedback('info', '<i class="bi bi-info-circle me-2"></i>Start typing or scan a barcode to see matching products.');
+            return;
+        }
+
+        lastQuery = query;
+        try {
+            const response = await fetch(`{% url 'inventory:weekly_search' order_list.id %}?q=${encodeURIComponent(query)}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch suggestions');
+            }
+            const data = await response.json();
+            if (lastQuery !== query) {
+                return;
+            }
+
+            // Combine strong matches with fuzzy suggestions for misspellings/partials
+            suggestions = [...(data.matches || []), ...(data.suggestions || [])];
+            if (suggestions.length === 0) {
+                hideSuggestions();
+                showFeedback('info', `<i class="bi bi-exclamation-triangle me-2"></i>No products found matching “${query}”.`);
+                return;
+            }
+
+            suggestionList.innerHTML = suggestions.map((product, index) => `
+                <button type="button" class="list-group-item list-group-item-action" data-index="${index}">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="fw-semibold">
+                                <i class="bi bi-tag me-2 text-primary"></i>${product.name}
+                            </div>
+                            <div class="small text-muted">
+                                <i class="bi bi-hash me-1"></i>${product.number}
+                                <span class="mx-2">•</span>
+                                <i class="bi bi-upc me-1"></i>${product.barcode || '—'}
+                                <span class="mx-2">•</span>
+                                <i class="bi bi-truck me-1"></i>${product.supplier_name || '—'}
+                            </div>
+                        </div>
+                        <i class="bi bi-arrow-return-right text-primary fs-5"></i>
+                    </div>
+                </button>
+            `).join('');
+
+            suggestionBox.classList.remove('hidden');
+            showFeedback('info', `<i class="bi bi-list-ul me-2"></i>Choose a product or press Enter to add the highlighted result.`);
+        } catch (error) {
+            hideSuggestions();
+            showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${error.message}`);
+        }
+    }
+
+    // Direct add when Enter is pressed before suggestions load (common with barcode scanners)
+    async function quickPickAndAdd(raw) {
+        const query = (raw || '').trim();
+        if (!query) return;
+        try {
+            const resp = await fetch(`{% url 'inventory:weekly_search' order_list.id %}?q=${encodeURIComponent(query)}`);
+            if (!resp.ok) throw new Error('Search failed');
+            const data = await resp.json();
+            const pool = [...(data.matches || []), ...(data.suggestions || [])];
+            if (pool.length === 0) {
+                showFeedback('info', `<i class="bi bi-exclamation-triangle me-2"></i>No products found matching “${escapeAttr(query)}”.`);
+                return;
+            }
+            // Prefer exact barcode or number match when available
+            const numeric = /^\d+$/.test(query) ? Number(query) : null;
+            let chosen = pool.find(p => p.barcode && p.barcode === query);
+            if (!chosen && numeric !== null) {
+                chosen = pool.find(p => p.number === numeric) || null;
+            }
+            if (!chosen) {
+                chosen = pool[0];
+            }
+            hideSuggestions();
+            queryInput.value = '';
+            await addProduct(chosen.number);
+        } catch (e) {
+            showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${e.message || 'Unable to add product'}`);
+        }
+    }
+
+    // Fetch monthly sales for a product (async, non-blocking)
+    async function fetchMonthlySales(productNumber, forceRefresh = false) {
+        try {
+            const url = new URL(`{% url 'inventory:monthly_sales_api' %}`, window.location.origin);
+            url.searchParams.set('product', productNumber);
+            if (forceRefresh) url.searchParams.set('force', '1');
+
+            console.log(`Fetching monthly sales for product ${productNumber}...`);
+            const response = await fetch(url);
+            if (!response.ok) {
+                console.warn(`Monthly sales API returned ${response.status} for product ${productNumber}`);
+                return;
+            }
+
+            const data = await response.json();
+            console.log(`Monthly sales data for product ${productNumber}:`, data);
+
+            const item = items.get(Number(productNumber));
+            if (!item) {
+                console.warn(`Item ${productNumber} not found in items map`);
+                return;
+            }
+
+            // Update monthly sales for current store and other stores
+            item.monthly_sales = data.sales[storeId] || 0;
+            item.other_monthly_sales = {};
+            for (const st of otherStores) {
+                if (data.sales[st.id]) {
+                    item.other_monthly_sales[st.id] = data.sales[st.id];
+                }
+            }
+
+            console.log(`Updated item ${productNumber} with monthly_sales=${item.monthly_sales}`);
+            items.set(item.product_number, item);
+            renderTable();
+        } catch (error) {
+            console.error(`Failed to fetch monthly sales for product ${productNumber}:`, error);
+        }
+    }
+
+    async function addProduct(productNumber) {
+        try {
+            const response = await fetch(`{% url 'inventory:weekly_add_item' order_list.id %}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken(),
+                },
+                body: JSON.stringify({ product_number: productNumber })
+            });
+            if (!response.ok) {
+                throw new Error('Unable to add product');
+            }
+            const data = await response.json();
+            items.set(data.product_number, data);
+            renderTable();
+            showFeedback('success', `<i class="bi bi-check-circle me-2"></i>Added "${data.product_name}".`);
+
+            // Fetch monthly sales in background (non-blocking)
+            fetchMonthlySales(productNumber);
+        } catch (error) {
+            showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${error.message}`);
+        }
+    }
+
+    async function patchItem(productNumber, payload) {
+        const key = typeof productNumber === 'number' ? productNumber : Number(productNumber);
+        const item = items.get(key);
+        if (!item) {
+            return;
+        }
+        try {
+            const response = await fetch(`{% url 'inventory:weekly_update_item' order_list.id 0 %}`.replace('/0/', `/${item.id}/`), {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken(),
+                },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                throw new Error('Failed to update item');
+            }
+            const data = await response.json();
+            const prev = items.get(data.product_number) || {};
+            if (!('other_stocks' in data) && prev.other_stocks) {
+                data.other_stocks = prev.other_stocks;
+            }
+            items.set(data.product_number, data);
+            renderTable();
+        } catch (error) {
+            showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${error.message}`);
+        }
+    }
+
+    function debouncedPatch(productNumber, payload, fieldKey, delay = 500) {
+        const mapKey = `${productNumber}:${fieldKey}`;
+        if (inputTimers.has(mapKey)) {
+            clearTimeout(inputTimers.get(mapKey));
+        }
+        const timer = setTimeout(() => {
+            patchItem(productNumber, payload);
+            inputTimers.delete(mapKey);
+        }, delay);
+        inputTimers.set(mapKey, timer);
+    }
+
+    async function removeItem(productNumber) {
+        const key = typeof productNumber === 'number' ? productNumber : Number(productNumber);
+        const item = items.get(key);
+        if (!item) {
+            return;
+        }
+        try {
+            const response = await fetch(`{% url 'inventory:weekly_delete_item' order_list.id 0 %}`.replace('/0/', `/${item.id}/`), {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRFToken': getCsrfToken(),
+                }
+            });
+            if (!response.ok) {
+                throw new Error('Failed to remove item');
+            }
+            items.delete(key);
+            renderTable();
+            showFeedback('success', `<i class="bi bi-trash me-2"></i>Removed product #${key}.`);
+        } catch (error) {
+            showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${error.message}`);
+        }
+    }
+
+    function getCsrfToken() {
+        const match = document.cookie.match(/csrftoken=([^;]+)/);
+        return match ? match[1] : '';
+    }
+
+    if (canEdit) suggestionList.addEventListener('click', async (event) => {
+        const item = event.target.closest('.list-group-item');
+        if (!item) {
+            return;
+        }
+        const index = Number(item.dataset.index);
+        const product = suggestions[index];
+        hideSuggestions();
+        queryInput.value = '';
+        await addProduct(product.number);
+    });
+
+    if (canEdit) queryInput.addEventListener('input', () => {
+        const value = queryInput.value.trim();
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => fetchSuggestions(value), 220);
+    });
+
+    if (canEdit) queryInput.addEventListener('keydown', async (event) => {
+        if (event.key === 'ArrowDown') {
+            if (suggestions.length === 0) {
+                return;
+            }
+            event.preventDefault();
+            highlightSuggestion((highlighted + 1) % suggestions.length);
+            return;
+        }
+        if (event.key === 'ArrowUp') {
+            if (suggestions.length === 0) {
+                return;
+            }
+            event.preventDefault();
+            highlightSuggestion((highlighted - 1 + suggestions.length) % suggestions.length);
+            return;
+        }
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            const current = queryInput.value.trim();
+            // Only trust suggestions if they were produced for the current input.
+            // This avoids using stale suggestions from a previous scan.
+            if (suggestions.length > 0 && lastQuery === current) {
+                const index = highlighted >= 0 ? highlighted : 0;
+                const product = suggestions[index];
+                hideSuggestions();
+                queryInput.value = '';
+                await addProduct(product.number);
+            } else {
+                // Perform a direct lookup for the current scan text.
+                await quickPickAndAdd(current);
+            }
+        }
+    });
+
+    document.addEventListener('click', (event) => {
+        if (!suggestionBox.contains(event.target) && event.target !== queryInput) {
+            hideSuggestions();
+        }
+    });
+
+    if (canEdit) tableBody.addEventListener('click', async (event) => {
+        const row = event.target.closest('tr');
+        if (!row) return;
+        const productNumber = Number(row.querySelector('th').textContent.trim());
+        if (event.target.closest('.remove-item')) {
+            await removeItem(productNumber);
+            return;
+        }
+        if (event.target.closest('.decrease')) {
+            const input = row.querySelector('.on-shelf');
+            const value = Math.max(Number(input.value) - 1, 0);
+            input.value = value;
+            await patchItem(productNumber, { on_shelf: value });
+            return;
+        }
+        if (event.target.closest('.increase')) {
+            const input = row.querySelector('.on-shelf');
+            const value = Number(input.value) + 1;
+            input.value = value;
+            await patchItem(productNumber, { on_shelf: value });
+            return;
+        }
+    });
+
+    // Admin-only fields change handlers
+    if (isAdmin) tableBody.addEventListener('change', async (event) => {
+        const row = event.target.closest('tr');
+        if (!row) return;
+        const productNumber = Number(row.querySelector('th').textContent.trim());
+        if (event.target.classList.contains('transfer-from')) {
+            const val = event.target.value;
+            await patchItem(productNumber, { transfer_from: val });
+            return;
+        }
+    });
+
+    if (isAdmin) tableBody.addEventListener('input', async (event) => {
+        const row = event.target.closest('tr');
+        if (!row) return;
+        const productNumber = Number(row.querySelector('th').textContent.trim());
+        const numericKeys = [
+            ['transfer-bottles','transfer_bottles'],
+            ['joe','joe'],
+            ['bt','bt'],
+            ['sqw','sqw']
+        ];
+        for (const [cls, key] of numericKeys) {
+            if (event.target.classList.contains(cls)) {
+                const raw = Number(event.target.value);
+                const value = isNaN(raw) ? 0 : Math.max(raw, 0);
+                debouncedPatch(productNumber, { [key]: value }, key);
+                return;
+            }
+        }
+    });
+
+    if (canEdit) tableBody.addEventListener('change', async (event) => {
+        const row = event.target.closest('tr');
+        if (!row) return;
+        const productNumber = Number(row.querySelector('th').textContent.trim());
+        if (event.target.classList.contains('on-shelf')) {
+            const value = Math.max(Number(event.target.value), 0);
+            event.target.value = value;
+            await patchItem(productNumber, { on_shelf: value });
+        }
+    });
+
+    // Autosave while typing, with debounce to reduce requests
+    if (canEdit) tableBody.addEventListener('input', (event) => {
+        const row = event.target.closest('tr');
+        if (!row) return;
+        const productNumber = Number(row.querySelector('th').textContent.trim());
+        if (event.target.classList.contains('on-shelf')) {
+            const raw = Number(event.target.value);
+            const value = isNaN(raw) ? 0 : Math.max(raw, 0);
+            debouncedPatch(productNumber, { on_shelf: value }, 'on_shelf');
+        }
+    });
+
+    const refreshAllButton = document.getElementById('refresh-all');
+    if (refreshAllButton) {
+        const refreshAllSpinner = refreshAllButton.querySelector('.spinner-border');
+
+        refreshAllButton.addEventListener('click', async () => {
+            const weeklyItems = Array.from(items.values());
+            if (!weeklyItems || weeklyItems.length === 0) {
+                showFeedback('info', '<i class="bi bi-info-circle me-2"></i>No products to refresh. Add products first.');
+                return;
+            }
+
+            refreshAllButton.disabled = true;
+            if (refreshAllSpinner) refreshAllSpinner.classList.remove('d-none');
+
+            const productCount = weeklyItems.length;
+            let currentStep = 0;
+            const totalSteps = 4;
+
+            try {
+                // Step 1: Sync Organizational Units (Stores)
+                currentStep = 1;
+                showFeedback('info', `<i class="bi bi-arrow-clockwise me-2"></i>[${currentStep}/${totalSteps}] Syncing stores...`);
+
+                const storesResponse = await fetch(`{% url 'inventory:product_refresh_api' %}?sync=stores`);
+                if (!storesResponse.ok) {
+                    throw new Error('Failed to sync stores');
+                }
+                const storesData = await storesResponse.json();
+                console.log('Stores synced:', storesData);
+
+                // Step 2: Sync Products from API
+                currentStep = 2;
+                showFeedback('info', `<i class="bi bi-arrow-clockwise me-2"></i>[${currentStep}/${totalSteps}] Syncing products from Korona API...`);
+
+                const productsResponse = await fetch(`{% url 'inventory:product_refresh_api' %}`);
+                if (!productsResponse.ok) {
+                    throw new Error('Failed to sync products');
+                }
+                const productsData = await productsResponse.json();
+                console.log('Products synced:', productsData.total);
+
+                // Step 3: Update stock for each item sequentially
+                currentStep = 3;
+                let stockUpdated = 0;
+                let stockFailed = 0;
+
+                for (let i = 0; i < weeklyItems.length; i++) {
+                    const item = weeklyItems[i];
+                    showFeedback('info', `<i class="bi bi-arrow-clockwise me-2"></i>[${currentStep}/${totalSteps}] Updating stock ${i + 1}/${productCount}: ${item.product_name}...`);
+
+                    try {
+                        const stockResponse = await fetch(`{% url 'inventory:product_stock_api' %}?product=${item.product_number}&force=1`);
+                        if (!stockResponse.ok) {
+                            throw new Error(`HTTP ${stockResponse.status}`);
+                        }
+
+                        const stockData = await stockResponse.json();
+
+                        // Find stock for current store
+                        const storeStock = stockData.stocks?.find(s => s.store.id === {{ order_list.store.id }});
+                        if (storeStock) {
+                            const newStock = storeStock.stock.actual || 0;
+                            item.system_stock = newStock;
+
+                            // Save to DB
+                            await fetch(`{% url 'inventory:weekly_update_item' order_list.id 0 %}`.replace('/0/', `/${item.id}/`), {
+                                method: 'PATCH',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
+                                },
+                                body: JSON.stringify({ system_stock: newStock }),
+                            });
+                        }
+
+                        stockUpdated++;
+                    } catch (error) {
+                        console.error(`Failed to update stock for ${item.product_name}:`, error);
+                        stockFailed++;
+                    }
+
+                    // Small delay to prevent overwhelming the API
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+
+                // Step 4: Fetch monthly sales for all items (async, in batches)
+                currentStep = 4;
+                let salesUpdated = 0;
+                let salesFailed = 0;
+                showFeedback('info', `<i class="bi bi-arrow-clockwise me-2"></i>[${currentStep}/${totalSteps}] Fetching monthly sales data...`);
+
+                // Process in batches of 5 to avoid overwhelming the server
+                const batchSize = 5;
+                for (let i = 0; i < weeklyItems.length; i += batchSize) {
+                    const batch = weeklyItems.slice(i, i + batchSize);
+                    const promises = batch.map(async (item) => {
+                        try {
+                            await fetchMonthlySales(item.product_number, true); // force refresh
+                            salesUpdated++;
+                        } catch (error) {
+                            console.error(`Failed to fetch monthly sales for ${item.product_name}:`, error);
+                            salesFailed++;
+                        }
+                    });
+                    await Promise.all(promises);
+
+                    // Small delay between batches
+                    if (i + batchSize < weeklyItems.length) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                }
+
+                // Re-render table with all updated values
+                renderTable();
+
+                // Show final summary
+                const summary = [];
+                summary.push(`Stores: synced`);
+                summary.push(`Products: synced (${productsData.total} total)`);
+                summary.push(`Stock: ${stockUpdated} updated${stockFailed > 0 ? ', ' + stockFailed + ' failed' : ''}`);
+                summary.push(`Monthly Sales: ${salesUpdated} fetched${salesFailed > 0 ? ', ' + salesFailed + ' failed' : ''}`);
+
+                if (stockFailed === 0 && salesFailed === 0) {
+                    showFeedback('success', `<i class="bi bi-check-circle me-2"></i>✅ Refresh complete! ${summary.join(' | ')}`);
+                } else {
+                    showFeedback('warning', `<i class="bi bi-exclamation-triangle me-2"></i>⚠️ Refresh complete with errors. ${summary.join(' | ')}`);
+                }
+
+            } catch (error) {
+                showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>❌ Refresh failed at step ${currentStep}: ${error.message}`);
+                console.error('Refresh error:', error);
+            } finally {
+                if (refreshAllSpinner) refreshAllSpinner.classList.add('d-none');
+                refreshAllButton.disabled = false;
+            }
+        });
+    }
+
+    if (refreshButton) {
+        refreshButton.addEventListener('click', async () => {
+            refreshButton.disabled = true;
+            if (refreshSpinner) refreshSpinner.classList.remove('d-none');
+            showFeedback('info', '<i class="bi bi-arrow-clockwise me-2"></i>Refreshing products from Korona...');
+            try {
+                const response = await fetch(`{% url 'inventory:product_refresh_api' %}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                if (!data.ok) {
+                    throw new Error(data.error || 'Unknown error');
+                }
+                showFeedback('success', `<i class="bi bi-check-circle me-2"></i>Products refreshed. Total products: ${data.total.toLocaleString()}.`);
+            } catch (error) {
+                showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>Failed to refresh products: ${error.message}`);
+            } finally {
+                if (refreshSpinner) refreshSpinner.classList.add('d-none');
+                refreshButton.disabled = false;
+            }
+
+            if (queryInput.value.trim()) {
+                fetchSuggestions(queryInput.value.trim());
+            }
+        });
+    }
+
+    renderTable();
+    // Row hover highlight
+    tableBody.addEventListener('mouseover', (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) tr.classList.add('hovered'); });
+    tableBody.addEventListener('mouseout', (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) tr.classList.remove('hovered'); });
+    applyBarcodePreference();
+    applyOtherStocksPreference();
+
+    // Load monthly sales data for existing items in background (non-blocking)
+    (async function loadInitialMonthlySales() {
+        const weeklyItems = Array.from(items.values());
+        if (weeklyItems.length === 0) return;
+
+        // Process in batches of 3 to avoid overwhelming the server on page load
+        const batchSize = 3;
+        for (let i = 0; i < weeklyItems.length; i += batchSize) {
+            const batch = weeklyItems.slice(i, i + batchSize);
+            const promises = batch.map(item => fetchMonthlySales(item.product_number));
+            await Promise.all(promises);
+
+            // Small delay between batches
+            if (i + batchSize < weeklyItems.length) {
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+        }
+    })();
+
+    // Export Modal Handler
+    let currentExportType = '';
+    const exportModal = document.getElementById('exportModal');
+    const exportTypeTitle = document.getElementById('export-type-title');
+
+    // Listen to all export buttons
+    document.querySelectorAll('[data-export-type]').forEach(btn => {
+        btn.addEventListener('click', function() {
+            currentExportType = this.getAttribute('data-export-type');
+            exportTypeTitle.textContent = currentExportType.toUpperCase();
+        });
+    });
+
+    // Handle format selection (Excel or PDF)
+    document.querySelectorAll('.export-format-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const format = this.getAttribute('data-format');
+            performExport(currentExportType, format);
+        });
+    });
+
+    function performExport(exportType, format) {
+        // Build the export URL
+        const url = `{% url 'inventory:weekly_export_custom' order_list.id %}?type=${exportType}&format=${format}`;
+
+        // Open in new tab
+        window.open(url, '_blank');
+
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(exportModal);
+        if (modal) modal.hide();
+    }
+})();
+</script>
+{% endblock %}

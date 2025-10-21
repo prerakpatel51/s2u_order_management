@@ -1,0 +1,49 @@
+# Core Django
+Django==5.2.7
+psycopg2-binary==2.9.10
+python-decouple==3.8
+dj-database-url==2.2.0  # Parse DATABASE_URL for Railway/Heroku
+
+# Production server
+gunicorn==23.0.0  # Updated from 21.2 (security fix)
+whitenoise==6.8.2
+
+# API & HTTP
+requests==2.32.5
+urllib3==2.2.3  # Explicit pin for security
+
+# Excel export
+openpyxl==3.1.5
+
+# PDF export
+reportlab==4.2.5
+
+# Caching (required for production)
+redis==5.2.1
+django-redis==5.4.0
+
+# Environment variables
+python-dotenv==1.0.1
+
+# Security & Rate Limiting
+django-csp==3.8  # Content Security Policy headers
+django-ratelimit==4.1.0  # Rate limiting for auth/API
+pybreaker==1.2.0  # Circuit breaker for external API calls
+
+# Schema Validation
+pydantic==2.10.6  # Validate external API responses
+
+# Observability & Monitoring
+sentry-sdk==2.20.0  # Error tracking
+python-json-logger==3.2.1  # Structured JSON logging
+django-prometheus==2.3.1  # Prometheus metrics
+
+# Testing (dev/ci only, but good to have)
+pytest==8.3.4
+pytest-django==4.9.0
+pytest-cov==6.0.0
+
+# Security scanning (dev/ci only)
+bandit==1.8.0
+pip-audit==2.7.3
+safety==3.2.11

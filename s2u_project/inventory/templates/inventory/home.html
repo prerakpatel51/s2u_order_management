@@ -1,0 +1,258 @@
+{% extends "inventory/base.html" %}
+
+{% block title %}S2U Operations · Dashboard{% endblock %}
+
+{% block extra_head %}
+<style>
+  .lists-toolbar .form-select,
+  .lists-toolbar .form-control {
+    min-width: 180px;
+  }
+  .list-scroll {
+    max-height: 340px; /* adds scrollbars when there are many lists */
+    overflow-y: auto;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{# Removed hero banner and feature cards per request #}
+
+<section class="py-5 bg-light">
+    <div class="container-xl">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="h4 mb-0 text-primary"><i class="bi bi-clipboard-check me-2"></i>Weekly Lists by Store</h2>
+            <div class="d-flex gap-2">
+              {% if can_refresh %}
+              <button id="refreshAllBtn" class="btn btn-sm btn-outline-primary">
+                <span class="spinner-border spinner-border-sm me-2 d-none" id="refreshAllSpin" role="status" aria-hidden="true"></span>
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh Data
+              </button>
+              {% endif %}
+              <a class="btn btn-sm btn-primary" href="{% url 'inventory:weekly_list_create' %}"><i class="bi bi-plus-circle me-2"></i>Create New List</a>
+            </div>
+        </div>
+
+        {% if can_refresh %}
+        <div id="globalRefreshNotice" class="alert alert-info d-none" role="alert">
+          <div class="d-flex align-items-center justify-content-between">
+            <div class="me-3">
+              <div class="fw-semibold" id="refreshStatusMsg"><i class="bi bi-cloud-arrow-down me-2"></i>Preparing refresh...</div>
+              <div class="small text-muted" id="refreshStatusDetail"></div>
+            </div>
+            <div class="flex-grow-1 ms-3">
+              <div class="progress" style="height: 8px;">
+                <div id="refreshProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <form id="filters-form" class="card border-0 shadow-sm mb-4" method="get">
+            <div class="card-body py-3 lists-toolbar">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-4">
+                        <label for="store_filter" class="form-label small text-muted">Store</label>
+                        <select id="store_filter" class="form-select" name="store">
+                            <option value="all" {% if not selected_store %}selected{% endif %}>All Stores</option>
+                            {% for st in stores_all %}
+                                <option value="{{ st.id }}" {% if selected_store and selected_store.id == st.id %}selected{% endif %}>{{ st.name }} ({{ st.number }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="date_from" class="form-label small text-muted">From</label>
+                        <input id="date_from" type="date" class="form-control" name="date_from" value="{{ date_from }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="date_to" class="form-label small text-muted">To</label>
+                        <input id="date_to" type="date" class="form-control" name="date_to" value="{{ date_to }}">
+                    </div>
+                    <div class="col-md-2 text-end">
+                        <button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-filter me-1"></i>Filter</button>
+                        <a href="{% url 'inventory:home' %}" class="btn btn-outline-secondary btn-sm mt-1 w-100">
+                            <i class="bi bi-x-circle me-1"></i>Clear
+                        </a>
+                    </div>
+                </div>
+                {# Removed quick date preset buttons per request #}
+            </div>
+        </form>
+
+        {% if stores %}
+        <div class="row g-4">
+            {% for store in stores %}
+            <div class="col-12 col-md-6 col-xl-4">
+                <div class="card h-100 border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pb-0">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <h3 class="h6 mb-1">{{ store.name }}</h3>
+                                <div class="text-muted small">#{{ store.number }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body pt-3">
+                        <div class="list-group list-group-flush list-scroll">
+                            {% for wl in store.weekly_lists.all %}
+                            <div class="list-group-item d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
+                                <div class="me-sm-3">
+                                    <div class="fw-semibold d-flex align-items-center gap-2">
+                                        <span>Week of {{ wl.target_date|date:"M j, Y" }}</span>
+                                        {% if wl.finalized_at %}
+                                            <span class="badge bg-success-subtle text-success">Finalized</span>
+                                        {% endif %}
+                                    </div>
+                                    <div class="text-muted small">{{ wl.item_count|default:0 }} items</div>
+                                </div>
+                                <div class="d-flex align-items-center gap-2 mt-1 mt-sm-0 ms-sm-2">
+                                    <div class="btn-group">
+                                        <a class="btn btn-sm btn-outline-secondary" href="{% url 'inventory:weekly_list_detail' wl.id %}">
+                                            <i class="bi bi-pencil-square me-1"></i>Edit
+                                        </a>
+                                        <a class="btn btn-sm btn-outline-success" target="_blank" href="{% url 'inventory:weekly_export_excel' wl.id %}">
+                                            <i class="bi bi-file-earmark-excel me-1"></i>Excel
+                                        </a>
+                                        <a class="btn btn-sm btn-outline-danger" target="_blank" href="{% url 'inventory:weekly_export_pdf' wl.id %}">
+                                            <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+                                        </a>
+                                    </div>
+                                    {% if request.user.is_authenticated and request.user.is_staff %}
+                                        {% if wl.finalized_at %}
+                                        <form method="post" action="{% url 'inventory:weekly_unfinalize_list' wl.id %}" class="d-inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-sm btn-warning">
+                                                <i class="bi bi-arrow-counterclockwise me-1"></i>Unfinalize
+                                            </button>
+                                        </form>
+                                        {% else %}
+                                        <form method="post" action="{% url 'inventory:weekly_finalize_list' wl.id %}" class="d-inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-sm btn-primary">
+                                                <i class="bi bi-check2-circle me-1"></i>Finalize
+                                            </button>
+                                        </form>
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% empty %}
+                            <div class="list-group-item text-muted">No lists yet.</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+            <div class="alert alert-light border-start border-4 border-primary-subtle">
+                <i class="bi bi-info-circle me-2"></i>No stores found.
+            </div>
+        {% endif %}
+    </div>
+    </section>
+{% endblock %}
+
+{# Removed JS for quick presets per request #}
+
+{% block extra_scripts %}
+{% if can_refresh %}
+<script>
+  (function() {
+    const btn = document.getElementById('refreshAllBtn');
+    const spin = document.getElementById('refreshAllSpin');
+    const notice = document.getElementById('globalRefreshNotice');
+    const msg = document.getElementById('refreshStatusMsg');
+    const detail = document.getElementById('refreshStatusDetail');
+    const bar = document.getElementById('refreshProgressBar');
+    let pollTimer = null;
+
+    function showNotice(kind) {
+      notice.classList.remove('d-none', 'alert-info', 'alert-success', 'alert-warning', 'alert-danger');
+      notice.classList.add('alert-' + kind);
+    }
+
+    async function poll(job) {
+      try {
+        const url = new URL(`{% url 'inventory:refresh_all_status' %}`, window.location.origin);
+        url.searchParams.set('job', job);
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Unknown error');
+
+        const pct = Math.max(0, Math.min(100, data.progress || 0));
+        bar.style.width = pct + '%';
+        bar.setAttribute('aria-valuenow', pct);
+        msg.innerHTML = `<i class="bi bi-arrow-repeat me-2"></i>${data.message || 'Working...'}`;
+
+        const parts = [];
+        if (data.stores != null) parts.push(`Stores: ${data.stores}`);
+        if (data.products != null) parts.push(`Products: ${data.products}`);
+        if (data.errors) parts.push(`Errors: ${data.errors}`);
+        detail.textContent = parts.join(' | ');
+
+        if (data.done) {
+          clearInterval(pollTimer);
+          spin?.classList.add('d-none');
+          btn.disabled = false;
+          if (data.step === 'error') {
+            showNotice('danger');
+            msg.innerHTML = `<i class="bi bi-exclamation-octagon me-2"></i>${data.message || 'Failed'}`;
+          } else {
+            showNotice('success');
+            msg.innerHTML = `<i class="bi bi-check-circle me-2"></i>Refresh complete.`;
+          }
+        }
+      } catch (err) {
+        clearInterval(pollTimer);
+        spin?.classList.add('d-none');
+        btn.disabled = false;
+        showNotice('danger');
+        msg.innerHTML = `<i class="bi bi-exclamation-octagon me-2"></i>${err.message}`;
+      }
+    }
+
+    async function startRefresh() {
+      btn.disabled = true;
+      spin?.classList.remove('d-none');
+      showNotice('info');
+      bar.style.width = '0%';
+      msg.innerHTML = `<i class="bi bi-cloud-arrow-down me-2"></i>Starting refresh...`;
+      detail.textContent = '';
+
+      try {
+        const res = await fetch(`{% url 'inventory:refresh_all_start' %}`, { method: 'POST', headers: { 'X-CSRFToken': getCsrfToken() } });
+        if (res.status === 409) {
+          showNotice('warning');
+          msg.innerHTML = `<i class="bi bi-exclamation-triangle me-2"></i>A refresh is already running.`;
+          spin?.classList.add('d-none');
+          btn.disabled = false;
+          return;
+        }
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Failed to start refresh');
+        pollTimer = setInterval(() => poll(data.job), 1200);
+      } catch (err) {
+        showNotice('danger');
+        msg.innerHTML = `<i class="bi bi-exclamation-octagon me-2"></i>${err.message}`;
+        spin?.classList.add('d-none');
+        btn.disabled = false;
+      }
+    }
+
+    function getCsrfToken() {
+      const cookie = document.cookie.split('; ').find(row => row.startsWith('csrftoken='));
+      return cookie ? cookie.split('=')[1] : '';
+    }
+
+    if (btn) {
+      btn.addEventListener('click', () => {
+        startRefresh();
+      });
+    }
+  })();
+</script>
+{% endif %}
+{% endblock %}

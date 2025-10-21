@@ -1,0 +1,603 @@
+{% extends "inventory/base.html" %}
+
+{% block title %}Inventory Lookup · S2U Operations{% endblock %}
+
+{% block extra_head %}
+<style>
+    body {
+        background: radial-gradient(circle at 20% 20%, #f3f7ff, #eef3ff 45%, #ffffff 75%);
+    }
+    .search-card {
+        border: none;
+        border-radius: 24px;
+        box-shadow: 0 32px 60px -45px rgba(37, 99, 235, 0.65);
+    }
+    .search-card .card-body {
+        padding: clamp(2rem, 6vw, 3rem);
+    }
+    .suggestion-box {
+        position: absolute;
+        top: calc(100% + 0.5rem);
+        left: 0;
+        right: 0;
+        z-index: 30;
+        max-height: 320px;
+        overflow-y: auto;
+    }
+    .suggestion-box.hidden {
+        display: none;
+    }
+    .list-group-item.active,
+    .list-group-item:focus,
+    .list-group-item:hover {
+        background-color: #e6efff;
+        border-color: rgba(37, 99, 235, 0.35);
+    }
+    .badge.bg-success-subtle {
+        background-color: rgba(34, 197, 94, 0.18) !important;
+        color: #15803d !important;
+    }
+    .table thead th {
+        white-space: nowrap;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.05em;
+    }
+    .table tbody td,
+    .table tbody th {
+        vertical-align: middle;
+        font-size: 0.95rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-xl py-4 py-lg-5">
+    <div class="row justify-content-center">
+        <div class="col-12 col-xl-9">
+            <div class="card search-card mb-4">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
+                        <div>
+                            <span class="badge bg-primary-subtle text-primary mb-3"><i class="bi bi-box-seam me-1"></i>Inventory Tools</span>
+                            <h1 class="h3 fw-bold text-primary mb-2">Inventory Lookup</h1>
+                            <p class="text-secondary mb-0">Scan a barcode or type part of a product name to view live stock across every store.</p>
+                        </div>
+                        <button id="refresh-stock" type="button" class="btn btn-outline-primary btn-sm">
+                            <span class="spinner-border spinner-border-sm me-2 d-none" role="status" aria-hidden="true"></span>
+                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh Stock & Monthly Needed
+                        </button>
+                    </div>
+
+                    <form id="search-form" autocomplete="off">
+                        <div class="position-relative">
+                            <label for="query" class="form-label text-uppercase small text-secondary fw-semibold">Search Products</label>
+                            <div class="input-group input-group-lg shadow-sm">
+                                <span class="input-group-text bg-white border-end-0"><i class="bi bi-upc-scan"></i></span>
+                                <input
+                                    type="text"
+                                    id="query"
+                                    name="q"
+                                    value="{{ query }}"
+                                    class="form-control border-start-0"
+                                    placeholder="e.g. 085592157158 or Tito's"
+                                >
+                            </div>
+                            <div id="suggestion-box" class="suggestion-box hidden">
+                                <div class="list-group shadow" id="suggestion-list"></div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div id="feedback" class="alert alert-light border-start border-4 border-primary-subtle shadow-sm" role="alert">
+                <i class="bi bi-info-circle me-2 text-primary"></i>
+                Start typing or scan a barcode to see matching products.
+            </div>
+
+            <div class="selected-container mt-5">
+                <h2 class="h4 mb-3">
+                    <i class="bi bi-grid-3x3-gap me-2 text-primary"></i>Selected Products
+                </h2>
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle d-none" id="selected-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th scope="col">#</th>
+                                <th scope="col">Product Name</th>
+                                <th scope="col">Barcode</th>
+                                <th scope="col">Supplier</th>
+                                {% for store in stores %}
+                                <th scope="col" class="text-center" title="{{ store.name }}">{{ store.number }}</th>
+                                {% endfor %}
+                                <th scope="col" class="text-center">Remove</th>
+                            </tr>
+                        </thead>
+                        <tbody id="selected-list"></tbody>
+                    </table>
+                </div>
+                <p id="selected-empty" class="empty">
+                    <i class="bi bi-bag"></i> Start typing or scan a barcode to add products.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script id="stores-data" type="application/json">{{ store_data_json|safe }}</script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+    const input = document.getElementById('query');
+    const form = document.getElementById('search-form');
+    const feedback = document.getElementById('feedback');
+    const suggestionBox = document.getElementById('suggestion-box');
+    const suggestionList = document.getElementById('suggestion-list');
+    const selectedTable = document.getElementById('selected-table');
+    const selectedList = document.getElementById('selected-list');
+    const selectedEmpty = document.getElementById('selected-empty');
+    const stores = JSON.parse(document.getElementById('stores-data').textContent);
+    const refreshButton = document.getElementById('refresh-stock');
+    const refreshSpinner = refreshButton.querySelector('.spinner-border');
+
+    let debounceTimer = null;
+    let lastQuery = input.value.trim();
+    let suggestionsData = [];
+    let highlighted = -1;
+    const selectedProducts = new Map();
+    let tooltipInstances = [];
+    let isProcessing = false;  // Prevent concurrent adds
+
+    function escapeAttr(value) {
+        return (value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function formatQuantity(value) {
+        const numeric = value || value === 0 ? Number(value) : 0;
+        return numeric.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
+    }
+
+    function refreshTooltips() {
+        tooltipInstances.forEach((instance) => instance.dispose());
+        tooltipInstances = Array.from(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(
+            (el) => new bootstrap.Tooltip(el)
+        );
+    }
+
+    // Fetch monthly sales for a product (async, non-blocking)
+    async function fetchMonthlySales(productNumber, forceRefresh = false) {
+        try {
+            const url = new URL(`{% url 'inventory:monthly_sales_api' %}`, window.location.origin);
+            url.searchParams.set('product', productNumber);
+            if (forceRefresh) url.searchParams.set('force', '1');
+
+            console.log(`[Inventory] Fetching monthly sales for product ${productNumber}...`);
+            const response = await fetch(url);
+            if (!response.ok) {
+                console.warn(`[Inventory] Monthly sales API returned ${response.status} for product ${productNumber}`);
+                return;
+            }
+
+            const data = await response.json();
+            console.log(`[Inventory] Monthly sales data for product ${productNumber}:`, data);
+
+            const key = String(productNumber);
+            const product = selectedProducts.get(key);
+            if (!product) {
+                console.warn(`[Inventory] Product ${productNumber} not found in selectedProducts`);
+                return;
+            }
+
+            // Update monthly sales
+            product.monthly_sales = data.sales || {};
+            selectedProducts.set(key, product);
+            console.log(`[Inventory] Updated product ${productNumber} with monthly_sales:`, product.monthly_sales);
+            renderSelected();
+        } catch (error) {
+            console.error(`[Inventory] Failed to fetch monthly sales for product ${productNumber}:`, error);
+        }
+    }
+
+    function renderSelected() {
+        if (selectedProducts.size === 0) {
+            selectedTable.classList.add('d-none');
+            selectedList.innerHTML = '';
+            selectedEmpty.style.display = 'block';
+            refreshTooltips();
+            return;
+        }
+
+        selectedEmpty.style.display = 'none';
+        selectedTable.classList.remove('d-none');
+
+        selectedList.innerHTML = Array.from(selectedProducts.values()).map((product) => {
+            const stockMap = new Map(
+                Array.isArray(product.stocks)
+                    ? product.stocks.map((entry) => [entry.store.id, entry])
+                    : []
+            );
+
+            const monthlySalesMap = product.monthly_sales || {};
+
+            const storeCells = stores.map((store) => {
+                const entry = stockMap.get(store.id);
+                const actual = formatQuantity(entry?.stock?.actual ?? 0);
+                const listed = entry?.stock?.listed;
+                const badge = listed
+                    ? ' <span class="badge bg-success-subtle text-success">Listed</span>'
+                    : '';
+                const cached = entry?.cached ? ' <span class="badge bg-warning-subtle text-warning" title="Cached data">📦</span>' : '';
+                const monthlySales = monthlySalesMap[store.id] || 0;
+                const salesDisplay = monthlySales > 0 ? `<div class="small text-primary fw-semibold">${monthlySales}/mo</div>` : '';
+                return `<td class="text-center" data-bs-toggle="tooltip" data-bs-placement="top" title="${escapeAttr(store.name)}"><div>${actual}${badge}${cached}</div>${salesDisplay}</td>`;
+            }).join('');
+
+            return `
+                <tr>
+                    <th scope="row" class="align-middle">${product.number}</th>
+                    <td class="align-middle">${product.name}</td>
+                    <td class="align-middle">${product.barcode || '—'}</td>
+                    <td class="align-middle">${product.supplier_name || '—'}</td>
+                    ${storeCells}
+                    <td class="text-center align-middle">
+                        <button type="button" class="btn btn-outline-danger btn-sm remove-product" data-number="${product.number}">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        refreshTooltips();
+    }
+
+    function hideSuggestions() {
+        suggestionBox.classList.add('hidden');
+        suggestionList.innerHTML = '';
+        suggestionsData = [];
+        highlighted = -1;
+    }
+
+    function highlight(index) {
+        highlighted = index;
+        const items = suggestionList.querySelectorAll('.list-group-item');
+        items.forEach((item, idx) => {
+            if (idx === highlighted) {
+                item.classList.add('active');
+                item.scrollIntoView({ block: 'nearest' });
+            } else {
+                item.classList.remove('active');
+            }
+        });
+    }
+
+    function renderSuggestions(query, matches, suggestions) {
+        const combined = [...matches, ...suggestions];
+        suggestionsData = combined;
+        highlighted = -1;
+        if (!query || combined.length === 0) {
+            hideSuggestions();
+            feedback.innerHTML = query
+                ? `<i class="bi bi-exclamation-triangle me-1"></i>No results found for “${query}”.`
+                : `<i class="bi bi-info-circle me-1"></i>Start typing or scan a barcode to see matching products.`;
+            return;
+        }
+
+        suggestionList.innerHTML = combined.map((product, index) => `
+            <button type="button" class="list-group-item list-group-item-action" data-index="${index}">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="fw-semibold">
+                            <i class="bi bi-tag me-2 text-primary"></i>${product.name}
+                        </div>
+                        <div class="small text-muted">
+                            <i class="bi bi-hash me-1"></i>${product.number}
+                            <span class="mx-2">•</span>
+                            <i class="bi bi-upc me-1"></i>${product.barcode || '—'}
+                            <span class="mx-2">•</span>
+                            <i class="bi bi-truck me-1"></i>${product.supplier_name || '—'}
+                        </div>
+                    </div>
+                    <i class="bi bi-arrow-return-right text-primary fs-5"></i>
+                </div>
+            </button>
+        `).join('');
+        suggestionBox.classList.remove('hidden');
+        feedback.innerHTML = `<i class="bi bi-list-ul me-1"></i>Showing ${combined.length} result${combined.length === 1 ? '' : 's'} for “${query}”. Use ↑ ↓ and Enter to add.`;
+    }
+
+    async function fetchSuggestions(query) {
+        if (!query) {
+            hideSuggestions();
+            feedback.innerHTML = `<i class="bi bi-info-circle me-1"></i>Start typing or scan a barcode to see matching products.`;
+            return;
+        }
+
+        lastQuery = query;
+        try {
+            const response = await fetch(`{% url 'inventory:product_search_api' %}?q=${encodeURIComponent(query)}`);
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            const data = await response.json();
+            if (lastQuery !== query) {
+                return;
+            }
+
+            renderSuggestions(query, data.matches, data.suggestions);
+        } catch (error) {
+            hideSuggestions();
+            feedback.innerHTML = `<i class="bi bi-wifi-off me-1"></i>Unable to fetch suggestions right now. Please try again.`;
+        }
+    }
+
+    async function fetchProductStock(productNumber, forceRefresh = false) {
+        const url = `{% url 'inventory:product_stock_api' %}?product=${productNumber}${forceRefresh ? '&force=1' : ''}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            let message = 'Unable to fetch stock.';
+            try {
+                const data = await response.json();
+                if (data && data.error) {
+                    message = data.error;
+                }
+            } catch (_) {
+                message = 'Unable to fetch stock.';
+            }
+            throw new Error(message);
+        }
+        const payload = await response.json();
+        if (payload.error) {
+            throw new Error(payload.error);
+        }
+        return payload;
+    }
+
+    async function refreshAllProductsStock() {
+        if (selectedProducts.size === 0) {
+            feedback.innerHTML = `<i class="bi bi-info-circle me-1"></i>No products to refresh. Add products first.`;
+            return;
+        }
+
+        const productCount = selectedProducts.size;
+        let refreshed = 0;
+        let failed = 0;
+        let salesRefreshed = 0;
+        let salesFailed = 0;
+
+        feedback.innerHTML = `<i class="bi bi-arrow-clockwise text-primary me-1"></i>Force refreshing ${productCount} product${productCount > 1 ? 's' : ''} from Korona API...`;
+
+        // Refresh all products concurrently (stock)
+        const refreshPromises = Array.from(selectedProducts.values()).map(async (product) => {
+            try {
+                const stockPayload = await fetchProductStock(product.number, true); // force=true
+
+                // Update the product data
+                selectedProducts.set(String(product.number), {
+                    ...product,
+                    stocks: stockPayload.stocks || [],
+                });
+
+                refreshed++;
+                return { success: true, product: product.name };
+            } catch (error) {
+                failed++;
+                return { success: false, product: product.name, error: error.message };
+            }
+        });
+
+        await Promise.all(refreshPromises);
+
+        // Re-render the table
+        renderSelected();
+
+        // Refresh monthly sales in batches (async, in background)
+        feedback.innerHTML = `<i class="bi bi-arrow-clockwise text-primary me-1"></i>Refreshing monthly sales data...`;
+        const batchSize = 5;
+        const productsArray = Array.from(selectedProducts.values());
+        for (let i = 0; i < productsArray.length; i += batchSize) {
+            const batch = productsArray.slice(i, i + batchSize);
+            const salesPromises = batch.map(async (product) => {
+                try {
+                    await fetchMonthlySales(product.number, true); // force refresh
+                    salesRefreshed++;
+                } catch (error) {
+                    console.error(`Failed to refresh monthly sales for ${product.name}:`, error);
+                    salesFailed++;
+                }
+            });
+            await Promise.all(salesPromises);
+
+            // Small delay between batches
+            if (i + batchSize < productsArray.length) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+        }
+
+        if (failed === 0 && salesFailed === 0) {
+            feedback.innerHTML = `<i class="bi bi-check-circle text-success me-1"></i>Successfully refreshed ${refreshed} product${refreshed > 1 ? 's' : ''} and ${salesRefreshed} monthly sales records!`;
+        } else {
+            feedback.innerHTML = `<i class="bi bi-exclamation-triangle text-warning me-1"></i>Refreshed ${refreshed}/${productCount} products and ${salesRefreshed}/${productCount} sales. ${failed + salesFailed} failed.`;
+        }
+    }
+
+    async function addProduct(product) {
+        if (!product) {
+            return;
+        }
+
+        // Prevent concurrent additions
+        if (isProcessing) {
+            console.log('Already processing, skipping...');
+            return;
+        }
+
+        const key = String(product.number);
+        if (selectedProducts.has(key)) {
+            hideSuggestions();
+            input.value = '';
+            lastQuery = '';
+            feedback.innerHTML = `<i class="bi bi-info-circle text-secondary me-1"></i>Product already added.`;
+            return;
+        }
+
+        isProcessing = true;
+        feedback.innerHTML = `<i class="bi bi-arrow-clockwise text-primary me-1"></i>Checking stock for "${product.name}" across all stores...`;
+
+        let stockEntries = [];
+        let stockPayload = null;
+        try {
+            stockPayload = await fetchProductStock(product.number);
+            if (Array.isArray(stockPayload?.stocks)) {
+                stockEntries = stockPayload.stocks;
+            }
+        } catch (error) {
+            feedback.innerHTML = `<i class="bi bi-exclamation-octagon text-danger me-1"></i>${error.message || 'Unable to retrieve stock. Try again.'}`;
+            isProcessing = false;
+            return;
+        }
+
+        selectedProducts.set(key, {
+            ...product,
+            stocks: stockEntries,
+            monthly_sales: {},
+        });
+
+        renderSelected();
+        hideSuggestions();
+        input.value = '';
+        lastQuery = '';
+        isProcessing = false;
+
+        if (stockEntries.length > 0) {
+            const totalQty = stockEntries.reduce((sum, entry) => {
+                const value = entry.stock?.actual;
+                return sum + (value || value === 0 ? Number(value) : 0);
+            }, 0);
+            feedback.innerHTML = `<i class="bi bi-check-circle text-success me-1"></i>Added "${product.name}" • Total stock: ${formatQuantity(totalQty)} across ${stockEntries.length} store${stockEntries.length === 1 ? '' : 's'}.`;
+        } else {
+            feedback.innerHTML = `<i class="bi bi-info-circle text-secondary me-1"></i>Added "${product.name}", but no stock was reported.`;
+        }
+
+        // Fetch monthly sales in background (non-blocking)
+        fetchMonthlySales(product.number);
+    }
+
+    suggestionList.addEventListener('mousedown', async (event) => {
+        event.preventDefault();
+        const item = event.target.closest('.list-group-item[data-index]');
+        if (!item) return;
+        const index = Number(item.dataset.index);
+        const product = suggestionsData[index];
+        await addProduct(product);
+    });
+
+    selectedList.addEventListener('click', (event) => {
+        const button = event.target.closest('.remove-product');
+        if (!button) {
+            return;
+        }
+        const key = button.dataset.number;
+        if (selectedProducts.delete(key)) {
+            renderSelected();
+            feedback.innerHTML = `<i class="bi bi-trash text-danger me-1"></i>Removed product #${key} from the list.`;
+        }
+    });
+
+    input.addEventListener('input', () => {
+        const value = input.value.trim();
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => fetchSuggestions(value), 250);
+    });
+
+    input.addEventListener('keydown', async (event) => {
+        if (suggestionsData.length === 0) {
+            if (event.key === 'Enter') {
+                // Fallback for fast barcode scans: do a quick lookup and add
+                event.preventDefault();
+                const raw = input.value.trim();
+                if (!raw) return;
+                try {
+                    const resp = await fetch(`{% url 'inventory:product_search_api' %}?q=${encodeURIComponent(raw)}`);
+                    if (!resp.ok) throw new Error('Search failed');
+                    const data = await resp.json();
+                    const pool = [...(data.matches || []), ...(data.suggestions || [])];
+                    if (pool.length === 0) {
+                        feedback.innerHTML = `<i class=\"bi bi-exclamation-triangle me-1\"></i>No results for “${raw}”.`;
+                        return;
+                    }
+                    const numeric = /^\d+$/.test(raw) ? Number(raw) : null;
+                    let chosen = pool.find(p => p.barcode && p.barcode === raw);
+                    if (!chosen && numeric !== null) {
+                        chosen = pool.find(p => p.number === numeric) || null;
+                    }
+                    if (!chosen) {
+                        chosen = pool[0];
+                    }
+                    await addProduct(chosen);
+                } catch (e) {
+                    feedback.innerHTML = `<i class=\"bi bi-exclamation-octagon text-danger me-1\"></i>${e.message || 'Unable to add product'}`;
+                }
+            }
+            return;
+        }
+        const maxIndex = suggestionsData.length - 1;
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            highlight(highlighted < maxIndex ? highlighted + 1 : 0);
+        } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            highlight(highlighted > 0 ? highlighted - 1 : maxIndex);
+        } else if (event.key === 'Enter') {
+            if (highlighted >= 0 && highlighted <= maxIndex) {
+                event.preventDefault();
+                await addProduct({ ...suggestionsData[highlighted] });
+            }
+        } else if (event.key === 'Escape') {
+            hideSuggestions();
+        }
+    });
+
+    document.addEventListener('click', (event) => {
+        if (!suggestionBox.contains(event.target) && event.target !== input) {
+            hideSuggestions();
+        }
+    });
+
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        fetchSuggestions(input.value.trim());
+    });
+
+    refreshButton.addEventListener('click', async () => {
+        refreshButton.disabled = true;
+        refreshSpinner.classList.remove('d-none');
+
+        try {
+            await refreshAllProductsStock();
+        } catch (error) {
+            feedback.innerHTML = `<i class="bi bi-exclamation-octagon text-danger me-1"></i>Refresh failed: ${error.message}`;
+        } finally {
+            refreshSpinner.classList.add('d-none');
+            refreshButton.disabled = false;
+        }
+    });
+
+    if (input.value.trim()) {
+        fetchSuggestions(input.value.trim());
+    }
+
+    renderSelected();
+})();
+</script>
+{% endblock %}
