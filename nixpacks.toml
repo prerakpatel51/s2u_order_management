@@ -14,21 +14,18 @@ cmds = [
 ]
 
 [phases.build]
-# collectstatic from the correct location
+[phases.build]
 cmds = [
-  "/opt/venv/bin/python s2u_project/manage.py collectstatic --noinput"
+  "python s2u_project/manage.py collectstatic --noinput"
 ]
 
 [phases.release]
 cmds = [
-  "/opt/venv/bin/python s2u_project/manage.py migrate"
+  "python s2u_project/manage.py migrate"
 ]
 
 [start]
-# gunicorn will be installed in the venv by requirements.txt
-# we keep --chdir so relative paths are safe at runtime
-cmd = "gunicorn s2u_project.wsgi:application --chdir s2u_project --bind 0.0.0.0:$PORT"
-
+cmd = "gunicorn --chdir s2u_project s2u_project.wsgi:application --bind 0.0.0.0:$PORT"
 # (optional) this helps some setups avoid extra auto-detection
 [variables]
 NIXPACKS_PATH="/opt/venv/bin:$NIXPACKS_PATH"
