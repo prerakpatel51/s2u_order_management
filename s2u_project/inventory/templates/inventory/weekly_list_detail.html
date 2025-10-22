@@ -885,6 +885,10 @@
     }
 
     function getCsrfToken() {
+        // Prefer token from hidden input rendered by Django (works with HttpOnly CSRF cookie)
+        const input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        if (input && input.value) return input.value;
+        // Fallback for dev when cookie is not HttpOnly
         const match = document.cookie.match(/csrftoken=([^;]+)/);
         return match ? match[1] : '';
     }

@@ -243,6 +243,8 @@
     }
 
     function getCsrfToken() {
+      const input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+      if (input && input.value) return input.value;
       const cookie = document.cookie.split('; ').find(row => row.startsWith('csrftoken='));
       return cookie ? cookie.split('=')[1] : '';
     }
