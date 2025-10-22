@@ -171,7 +171,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Auth redirects
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "inventory:home"
-LOGOUT_REDIRECT_URL = "login"
+LOGOUT_REDIRECT_URL = "inventory:home"
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # Security settings (production only)
 if IS_PRODUCTION:

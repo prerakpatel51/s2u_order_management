@@ -321,13 +321,21 @@ def product_search(request):
     )
 
 
-@login_required
 def home(request):
     """Dashboard landing page.
 
     Adds a grouped view of weekly order lists per store, with lists
     sorted by target date (newest first) and an Edit link per list.
     """
+    # If not authenticated, render public landing page with login CTA
+    if not request.user.is_authenticated:
+        return render(
+            request,
+            "inventory/landing.html",
+            {
+                "active_tab": "home",
+            },
+        )
     from .models import WeeklyOrderList
 
     # Filters from query params
@@ -2338,5 +2346,5 @@ def logout_view(request):
     # Only allow POST to prevent CSRF attacks via GET links/images
     if request.method == "POST":
         logout(request)
-        return redirect("login")
+        return redirect("inventory:home")
     return JsonResponse({"error": "Method not allowed. Use POST."}, status=405)

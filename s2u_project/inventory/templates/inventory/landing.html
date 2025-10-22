@@ -1,0 +1,39 @@
+{% extends "inventory/base.html" %}
+
+{% block title %}S2U Order Management · Welcome{% endblock %}
+
+{% block content %}
+<section class="py-5 bg-light">
+  <div class="container-xl">
+    <div class="row align-items-center g-4">
+      <div class="col-12 col-lg-7">
+        <h1 class="display-6 fw-bold text-primary mb-3">S2U Order Management</h1>
+        <p class="lead text-secondary mb-4">Faster weekly ordering, live stock visibility across stores, and one‑click exports — all in one place.</p>
+        <ul class="list-unstyled mb-4">
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i>Search products with barcode or name (typo‑tolerant)</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i>Live system stock per store with cross‑store view</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i>Weekly lists: add, adjust, finalize, and export (Excel/PDF)</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i>Admin tools for user management</li>
+        </ul>
+        <a class="btn btn-primary btn-lg" href="{% url 'login' %}"><i class="bi bi-box-arrow-in-right me-2"></i>Login</a>
+      </div>
+      <div class="col-12 col-lg-5">
+        <div class="card border-0 shadow-sm">
+          <div class="card-body">
+            <h2 class="h6 text-muted mb-3">Quick Facts</h2>
+            <dl class="row mb-0 small">
+              <dt class="col-5">Stores synced</dt>
+              <dd class="col-7">Live from Korona</dd>
+              <dt class="col-5">Exports</dt>
+              <dd class="col-7">Excel, PDF</dd>
+              <dt class="col-5">Security</dt>
+              <dd class="col-7">CSRF + session protection</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
