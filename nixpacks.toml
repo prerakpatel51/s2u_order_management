@@ -1,11 +1,25 @@
+# nixpacks.toml
+
 [phases.setup]
 nixPkgs = ["python311", "gcc"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = [
+  "python -m pip install --upgrade pip",
+  "python -m pip install -r requirements.txt"
+]
 
 [phases.build]
-cmds = ["python s2u_project/manage.py collectstatic --noinput"]
+# collect static from the correct path
+cmds = [
+  "python s2u_project/manage.py collectstatic --noinput"
+]
+
+[phases.release]
+# run migrations during release, not during build
+cmds = [
+  "python s2u_project/manage.py migrate"
+]
 
 [start]
-cmd = "gunicorn s2u_project.wsgi:application --bind 0.0.0.0:$PORT"
+cmd = "gunicorn s2u_project.wsgi:application --chdir s2u_project --bind 0.0.0.0:$PORT"
