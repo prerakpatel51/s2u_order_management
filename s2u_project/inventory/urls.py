@@ -14,6 +14,8 @@ urlpatterns = [
     # Global refresh orchestration (async)
     path("api/refresh/start/", views.refresh_all_start_api, name="refresh_all_start"),
     path("api/refresh/status/", views.refresh_all_status_api, name="refresh_all_status"),
+    # Public About page
+    path("about/", views.about, name="about"),
     # Weekly list URLs
     path("weekly/create/", views.weekly_list_create, name="weekly_list_create"),
     path("weekly/<int:list_id>/", views.weekly_list_detail, name="weekly_list_detail"),

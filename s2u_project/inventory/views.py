@@ -433,6 +433,11 @@ def product_search_api(request):
     return JsonResponse(payload)
 
 
+def about(request):
+    """Public About page with brief info and login CTA."""
+    return render(request, "inventory/about.html", {"active_tab": "about"})
+
+
 @ratelimit(key='user_or_ip', rate='50/m', method='GET', block=True)
 @login_required
 @require_GET

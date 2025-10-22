@@ -1,0 +1,27 @@
+{% extends "inventory/base.html" %}
+
+{% block title %}About · S2U Order Management{% endblock %}
+
+{% block content %}
+<section class="py-5 hero-gradient">
+  <div class="container-xl">
+    <div class="row justify-content-center">
+      <div class="col-lg-8">
+        <div class="card border-0 shadow-sm">
+          <div class="card-body p-4 p-lg-5">
+            <h1 class="h3 fw-bold text-primary mb-3">About the Developer</h1>
+            <p class="text-secondary mb-3">Hi, I’m <strong>Prerak Patel</strong>. I built S2U Order Management to streamline weekly ordering and give stores a clear, real‑time view of product inventory across locations.</p>
+            <ul class="list-unstyled small mb-4">
+              <li class="mb-2"><i class="bi bi-dot"></i> Live stock lookups from Korona across stores</li>
+              <li class="mb-2"><i class="bi bi-dot"></i> Fast product search (barcode and typo‑tolerant text)</li>
+              <li class="mb-2"><i class="bi bi-dot"></i> Weekly lists with one‑click exports and admin tools</li>
+            </ul>
+            <a class="btn btn-primary" href="{% url 'login' %}"><i class="bi bi-box-arrow-in-right me-2"></i>Login</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </section>
+{% endblock %}
+
