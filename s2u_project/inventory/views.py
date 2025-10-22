@@ -28,6 +28,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth import logout
 from .redis_client import r as redis_client
 from .redis_client import get_json as redis_get_json, set_json as redis_set_json, setnx as redis_setnx, delete as redis_delete, exists as redis_exists
+import threading
 import uuid
 
 # Key helpers for global refresh progress
@@ -1126,7 +1127,7 @@ def weekly_add_item_api(request, list_id):
             existing_item.save()
             item = existing_item
         else:
-            # Fetch system stock for this store (no cache for weekly add)
+            # Fetch system stock for this store (prefer fresh; fallback to DB cached)
             system_stock = Decimal("0")
             if product.korona_id and order_list.store.korona_id:
                 try:
@@ -1146,7 +1147,55 @@ def weekly_add_item_api(request, list_id):
                             except ValueError:
                                 continue
                 except requests.RequestException:
-                    pass
+                    # Network/API failure: use last known DB value if available and schedule a retry
+                    cached_ps = ProductStock.objects.filter(product=product, store=order_list.store).only("actual").first()
+                    if cached_ps:
+                        system_stock = cached_ps.actual
+                    retry_in = 45
+                    def _retry_worker(prod_id: int, store_id: int, item_pk: int, order_list_pk: int):
+                        try:
+                            from .models import Product as ProdModel, Store as StoreModel, WeeklyOrderItem
+                            prod = ProdModel.objects.get(pk=prod_id)
+                            store = StoreModel.objects.get(pk=store_id)
+                            payload2 = fetch_product_stocks(prod.korona_id, force_refresh=True)
+                            results2 = (payload2 or {}).get("results") or []
+                            for entry in results2:
+                                warehouse = entry.get("warehouse") or {}
+                                wid = warehouse.get("id")
+                                if not wid:
+                                    continue
+                                try:
+                                    if UUID(str(wid)) != store.korona_id:
+                                        continue
+                                except ValueError:
+                                    continue
+                                amount = entry.get("amount") or {}
+                                new_stock = Decimal(str(amount.get("actual", "0") or "0"))
+                                # Persist: ProductStock and the weekly item row
+                                with transaction.atomic():
+                                    ProductStock.objects.update_or_create(
+                                        product=prod,
+                                        store=store,
+                                        defaults={
+                                            "actual": new_stock,
+                                            "lent": Decimal("0"),
+                                            "max_level": Decimal("0"),
+                                            "ordered": Decimal("0"),
+                                            "reorder_level": Decimal("0"),
+                                            "average_purchase_price": Decimal("0"),
+                                            "listed": True,
+                                        },
+                                    )
+                                    try:
+                                        witem = WeeklyOrderItem.objects.get(pk=item_pk, order_list_id=order_list_pk)
+                                        witem.system_stock = new_stock
+                                        witem.save(update_fields=["system_stock"])
+                                    except WeeklyOrderItem.DoesNotExist:
+                                        pass
+                                break
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("[retry] system stock retry failed for product=%s store=%s: %s", prod_id, store_id, exc)
+
 
             # Create new item
             item = WeeklyOrderItem.objects.create(
@@ -1156,6 +1205,14 @@ def weekly_add_item_api(request, list_id):
                 monthly_needed=0,
                 system_stock=system_stock,
             )
+            # If a retry was scheduled, start it now with the real item id
+            try:
+                if 'retry_in' in locals():
+                    t = threading.Timer(retry_in, _retry_worker, args=(product.pk, order_list.store.pk, item.pk, order_list.pk))
+                    t.daemon = True
+                    t.start()
+            except Exception as exc:
+                logger.warning("[retry] scheduling failed: %s", exc)
 
         # Only build cross-store data for admins
         other_map = {}
@@ -1186,6 +1243,7 @@ def weekly_add_item_api(request, list_id):
                 "bt": item.bt,
                 "sqw": item.sqw,
                 "other_stocks": other_map,
+                **({"retry_scheduled": True, "retry_in_seconds": retry_in} if 'retry_in' in locals() else {}),
             }
         )
 

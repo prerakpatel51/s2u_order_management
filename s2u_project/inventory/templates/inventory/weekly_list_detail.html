@@ -545,9 +545,14 @@
                     ${otherStoreCells}
                     ${adminCells}
                     <td class="text-center align-middle action-cell">
-                        <button type="button" class="btn btn-outline-danger btn-sm remove-item" ${!canEdit ? 'disabled' : ''}>
-                            <i class="bi bi-trash"></i>
-                        </button>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-primary refresh-item" title="Refresh stock" ${!canEdit ? '' : ''}>
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <button type="button" class="btn btn-outline-danger remove-item" ${!canEdit ? 'disabled' : ''} title="Remove">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
                     </td>
                 </tr>
             `;
@@ -813,6 +818,38 @@
 
             // Fetch monthly sales in background (non-blocking)
             fetchMonthlySales(productNumber);
+
+            // If server scheduled a retry (e.g., Korona temporarily unreachable),
+            // schedule a silent row refresh to update system stock after the delay.
+            if (data.retry_scheduled && data.retry_in_seconds) {
+                const delayMs = Math.max(5, Number(data.retry_in_seconds)) * 1000;
+                setTimeout(async () => {
+                    try {
+                        const url = new URL(`{% url 'inventory:product_stock_api' %}`, window.location.origin);
+                        url.searchParams.set('product', String(productNumber));
+                        url.searchParams.set('store', String({{ order_list.store.id }}));
+                        url.searchParams.set('force', '1');
+                        const res = await fetch(url.toString());
+                        if (!res.ok) return;
+                        const stockData = await res.json();
+                        const found = (stockData.stocks || []).find(s => s.store && s.store.id === {{ order_list.store.id }});
+                        if (found) {
+                            const newStock = Number(found.stock?.actual || 0);
+                            const item = items.get(Number(productNumber));
+                            if (item) {
+                                item.system_stock = newStock;
+                                renderTable();
+                                // Persist to DB so the value is consistent if user reloads
+                                await fetch(`{% url 'inventory:weekly_update_item' order_list.id 0 %}`.replace('/0/', `/${item.id}/`), {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+                                    body: JSON.stringify({ system_stock: newStock })
+                                });
+                            }
+                        }
+                    } catch (_) { /* ignore */ }
+                }, delayMs);
+            }
         } catch (error) {
             showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${error.message}`);
         }
@@ -956,6 +993,38 @@
         const row = event.target.closest('tr');
         if (!row) return;
         const productNumber = Number(row.querySelector('th').textContent.trim());
+        if (event.target.closest('.refresh-item')) {
+            try {
+                const url = new URL(`{% url 'inventory:product_stock_api' %}`, window.location.origin);
+                url.searchParams.set('product', String(productNumber));
+                url.searchParams.set('store', String({{ order_list.store.id }}));
+                url.searchParams.set('force', '1');
+                const res = await fetch(url.toString());
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const storeStock = (data.stocks || []).find(s => s.store && s.store.id === {{ order_list.store.id }});
+                if (storeStock) {
+                    const newStock = Number(storeStock.stock?.actual || 0);
+                    const item = items.get(productNumber);
+                    if (item) {
+                        item.system_stock = newStock;
+                        renderTable();
+                        // Persist to DB so value remains on reload
+                        await fetch(`{% url 'inventory:weekly_update_item' order_list.id 0 %}`.replace('/0/', `/${item.id}/`), {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+                            body: JSON.stringify({ system_stock: newStock })
+                        });
+                        showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Stock refreshed for #${productNumber}.`);
+                    }
+                } else {
+                    showFeedback('warning', `<i class=\"bi bi-exclamation-triangle me-2\"></i>No stock data returned for this store.`);
+                }
+            } catch (e) {
+                showFeedback('danger', `<i class=\"bi bi-exclamation-octagon me-2\"></i>Refresh failed: ${e.message}`);
+            }
+            return;
+        }
         if (event.target.closest('.remove-item')) {
             await removeItem(productNumber);
             return;
