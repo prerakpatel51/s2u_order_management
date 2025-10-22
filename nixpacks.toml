@@ -24,7 +24,12 @@ cmds = [
 ]
 
 [start]
-cmd = "gunicorn --chdir s2u_project s2u_project.wsgi:application --bind 0.0.0.0:$PORT"
-# (optional) this helps some setups avoid extra auto-detection
+# Don’t import <pkg>.wsgi directly; call Django’s loader instead.
+cmd = "gunicorn --chdir /app django.core.wsgi:get_wsgi_application --bind 0.0.0.0:$PORT"
+
 [variables]
+# Set this to whatever manage.py uses.
+# Example values you might see: "s2u_project.settings", "config.settings", etc.
+DJANGO_SETTINGS_MODULE="s2u_project.settings"
+PYTHONPATH="/app:/app/s2u_project:$PYTHONPATH"
 NIXPACKS_PATH="/opt/venv/bin:$NIXPACKS_PATH"
