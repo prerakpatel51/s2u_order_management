@@ -14,7 +14,6 @@ cmds = [
 ]
 
 [phases.build]
-[phases.build]
 cmds = [
   "python s2u_project/manage.py collectstatic --noinput"
 ]
