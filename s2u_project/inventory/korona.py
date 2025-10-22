@@ -200,6 +200,7 @@ def fetch_product_stocks(product_id: str, force_refresh: bool = False) -> Option
     except requests.RequestException as exc:
         logger.error("Failed to fetch stock for product %s: %s", product_id, exc)
         # Try to return stale cache if available
+        stale_data = None
         stale_raw = redis_client.get(cache_key)
         if stale_raw is not None:
             try:

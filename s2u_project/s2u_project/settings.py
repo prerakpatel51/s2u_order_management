@@ -121,17 +121,16 @@ DATABASES = {
     }
 }
 
-# Note: PostgreSQL support is available if needed in the future
-# Just uncomment this block and set DATABASE_URL in .env
-# if IS_PRODUCTION and os.environ.get("DATABASE_URL"):
-#     import dj_database_url
-#     DATABASES = {
-#         "default": dj_database_url.config(
-#             default=os.environ["DATABASE_URL"],
-#             conn_max_age=600,
-#             conn_health_checks=True,
-#         )
-#     }
+# Switch to PostgreSQL automatically when DATABASE_URL is present (dev or prod)
+if os.environ.get("DATABASE_URL"):
+    import dj_database_url
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=os.environ["DATABASE_URL"],
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
