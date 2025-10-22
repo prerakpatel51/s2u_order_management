@@ -172,7 +172,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "inventory:home"
 LOGOUT_REDIRECT_URL = "login"
-
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # Security settings (production only)
 if IS_PRODUCTION:
     SECURE_SSL_REDIRECT = True
@@ -309,3 +309,25 @@ if IS_PRODUCTION:
 else:
     # In development, already removed file handler above
     pass
+
+# --- Production-only tweaks
+if IS_PRODUCTION:
+    # Hosts
+    ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
+    if not ALLOWED_HOSTS or ALLOWED_HOSTS == [""]:
+        raise ValueError("DJANGO_ALLOWED_HOSTS environment variable must be set in production")
+
+    # CSRF trusted origins (add Railway + any custom domains)
+    CSRF_TRUSTED_ORIGINS = [
+        "https://s2uordermanagement-production.up.railway.app",
+        # "https://yourdomain.com",  # add if you have a custom domain
+    ]
+
+    # WhiteNoise static file storage w/ compression & manifest
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+else:
+    ALLOWED_HOSTS = ["*"]
+    # keep your existing dev CSRF_TRUSTED_ORIGINS if you need ngrok
+    CSRF_TRUSTED_ORIGINS = [
+        "https://cb816ee7f588.ngrok-free.app",
+    ]
