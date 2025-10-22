@@ -814,10 +814,31 @@
             const data = await response.json();
             items.set(data.product_number, data);
             renderTable();
-            showFeedback('success', `<i class="bi bi-check-circle me-2"></i>Added "${data.product_name}".`);
+            showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Added \"${data.product_name}\".`);
 
             // Fetch monthly sales in background (non-blocking)
             fetchMonthlySales(productNumber);
+
+            // Kick off a cross-store stock refresh to populate other store columns immediately
+            try {
+                const url = new URL(`{% url 'inventory:product_stock_api' %}`, window.location.origin);
+                url.searchParams.set('product', String(productNumber));
+                const res = await fetch(url.toString());
+                if (res.ok) {
+                    const stockData = await res.json();
+                    const item = items.get(Number(productNumber));
+                    if (item) {
+                        const otherMap = {};
+                        for (const s of (stockData.stocks || [])) {
+                            const sid = s.store?.id;
+                            if (!sid || sid === {{ order_list.store.id }}) continue;
+                            otherMap[sid] = Number(s.stock?.actual || 0);
+                        }
+                        item.other_stocks = { ...(item.other_stocks || {}), ...otherMap };
+                        renderTable();
+                    }
+                }
+            } catch (_) { /* ignore */ }
 
             // If server scheduled a retry (e.g., Korona temporarily unreachable),
             // schedule a silent row refresh to update system stock after the delay.
@@ -995,31 +1016,38 @@
         const productNumber = Number(row.querySelector('th').textContent.trim());
         if (event.target.closest('.refresh-item')) {
             try {
+                // Fetch stock across ALL stores for this product and update current + other columns
                 const url = new URL(`{% url 'inventory:product_stock_api' %}`, window.location.origin);
                 url.searchParams.set('product', String(productNumber));
-                url.searchParams.set('store', String({{ order_list.store.id }}));
                 url.searchParams.set('force', '1');
                 const res = await fetch(url.toString());
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                const storeStock = (data.stocks || []).find(s => s.store && s.store.id === {{ order_list.store.id }});
-                if (storeStock) {
-                    const newStock = Number(storeStock.stock?.actual || 0);
-                    const item = items.get(productNumber);
-                    if (item) {
-                        item.system_stock = newStock;
-                        renderTable();
-                        // Persist to DB so value remains on reload
-                        await fetch(`{% url 'inventory:weekly_update_item' order_list.id 0 %}`.replace('/0/', `/${item.id}/`), {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
-                            body: JSON.stringify({ system_stock: newStock })
-                        });
-                        showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Stock refreshed for #${productNumber}.`);
-                    }
-                } else {
-                    showFeedback('warning', `<i class=\"bi bi-exclamation-triangle me-2\"></i>No stock data returned for this store.`);
+                const item = items.get(productNumber);
+                if (!item) return;
+                const stocks = data.stocks || [];
+                // Update current store
+                const cur = stocks.find(s => s.store && s.store.id === {{ order_list.store.id }});
+                if (cur) {
+                    const newStock = Number(cur.stock?.actual || 0);
+                    item.system_stock = newStock;
+                    // Persist to DB so value remains on reload
+                    await fetch(`{% url 'inventory:weekly_update_item' order_list.id 0 %}`.replace('/0/', `/${item.id}/`), {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+                        body: JSON.stringify({ system_stock: newStock })
+                    });
                 }
+                // Update other stores columns
+                const otherMap = {};
+                for (const s of stocks) {
+                    const sid = s.store?.id;
+                    if (!sid || sid === {{ order_list.store.id }}) continue;
+                    otherMap[sid] = Number(s.stock?.actual || 0);
+                }
+                item.other_stocks = { ...(item.other_stocks || {}), ...otherMap };
+                renderTable();
+                showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Stock refreshed for #${productNumber}.`);
             } catch (e) {
                 showFeedback('danger', `<i class=\"bi bi-exclamation-octagon me-2\"></i>Refresh failed: ${e.message}`);
             }
@@ -1151,12 +1179,12 @@
                     showFeedback('info', `<i class="bi bi-arrow-clockwise me-2"></i>[${currentStep}/${totalSteps}] Updating stock ${i + 1}/${productCount}: ${item.product_name}...`);
 
                     try {
-                        const stockResponse = await fetch(`{% url 'inventory:product_stock_api' %}?product=${item.product_number}&force=1`);
-                        if (!stockResponse.ok) {
-                            throw new Error(`HTTP ${stockResponse.status}`);
-                        }
+                const stockResponse = await fetch(`{% url 'inventory:product_stock_api' %}?product=${item.product_number}&force=1`);
+                if (!stockResponse.ok) {
+                    throw new Error(`HTTP ${stockResponse.status}`);
+                }
 
-                        const stockData = await stockResponse.json();
+                const stockData = await stockResponse.json();
 
                         // Find stock for current store
                         const storeStock = stockData.stocks?.find(s => s.store.id === {{ order_list.store.id }});
@@ -1174,6 +1202,14 @@
                                 body: JSON.stringify({ system_stock: newStock }),
                             });
                         }
+                        // Update other stores too, since the payload has all stores
+                        const otherMap = {};
+                        for (const s of (stockData.stocks || [])) {
+                            const sid = s.store?.id;
+                            if (!sid || sid === {{ order_list.store.id }}) continue;
+                            otherMap[sid] = Number(s.stock?.actual || 0);
+                        }
+                        item.other_stocks = { ...(item.other_stocks || {}), ...otherMap };
 
                         stockUpdated++;
                     } catch (error) {
