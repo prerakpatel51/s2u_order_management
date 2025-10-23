@@ -1,14 +1,85 @@
-/* Teal theme */
+/* Spirits2U brand theme (navy + orange) */
 :root {
-  --bs-primary: #0d9488; /* Teal-600 */
+  /* Core brand palette */
+  --brand-orange: #e5492e;      /* Primary accent from logo */
+  --brand-orange-600: #cf3f27;  /* Hover/darker */
+  --brand-orange-300: #ff6b4e;  /* Lighter accent */
+  --brand-navy: #0f1a26;        /* Background/nav */
+  --brand-navy-700: #1a2430;    /* Navbar/sections */
+  --brand-navy-600: #223042;    /* Subtle borders */
+
+  /* Bootstrap color hooks */
+  --bs-primary: var(--brand-orange);
   --bs-secondary: #64748b; /* Slate-500 */
-  --bs-success: #16a34a; /* Green-600 */
-  --bs-info: #06b6d4; /* Cyan-500 */
-  --bs-warning: #f59e0b; /* Amber-500 */
-  --bs-danger: #dc2626; /* Red-600 */
-  --brand-dark: #0f172a; /* Slate-900 */
-  --brand-dark-2: #134e4a; /* Teal-800 */
-  --brand-accent: #2dd4bf; /* Teal-300 */
+  --bs-success: #16a34a;  /* Green-600 */
+  --bs-info: #06b6d4;     /* Cyan-500 */
+  --bs-warning: #f59e0b;  /* Amber-500 */
+  --bs-danger: #dc2626;   /* Red-600 */
+
+  /* Legacy variables kept for existing selectors */
+  --brand-dark: var(--brand-navy);
+  --brand-dark-2: var(--brand-navy-700);
+  --brand-accent: var(--brand-orange-300);
+
+  /* Material-esque tokens requested (mapped to brand). These are safe no-ops if unused. */
+  --ch-alt-main: var(--brand-orange);
+  --mdc-filled-text-field-caret-color: var(--ch-alt-main);
+  --mdc-filled-text-field-focus-active-indicator-color: var(--ch-alt-main);
+  --mdc-filled-text-field-focus-label-text-color: var(--ch-alt-main);
+  --mdc-filled-text-field-container-color: whitesmoke;
+  --mdc-filled-text-field-disabled-container-color: #fafafa;
+  --mdc-filled-text-field-label-text-color: rgba(0, 0, 0, .6);
+  --mdc-filled-text-field-hover-label-text-color: rgba(0, 0, 0, .6);
+  --mdc-filled-text-field-disabled-label-text-color: rgba(0, 0, 0, .38);
+  --mdc-filled-text-field-input-text-color: rgba(0, 0, 0, .87);
+  --mdc-filled-text-field-disabled-input-text-color: rgba(0, 0, 0, .38);
+  --mdc-filled-text-field-input-text-placeholder-color: rgba(0, 0, 0, .6);
+  --mdc-filled-text-field-error-hover-label-text-color: #f44336;
+  --mdc-filled-text-field-error-focus-label-text-color: #f44336;
+  --mdc-filled-text-field-error-label-text-color: #f44336;
+  --mdc-filled-text-field-error-caret-color: #f44336;
+  --mdc-filled-text-field-active-indicator-color: rgba(0, 0, 0, .42);
+  --mdc-filled-text-field-disabled-active-indicator-color: rgba(0, 0, 0, .06);
+  --mdc-filled-text-field-hover-active-indicator-color: rgba(0, 0, 0, .87);
+  --mdc-filled-text-field-error-active-indicator-color: #f44336;
+  --mdc-filled-text-field-error-focus-active-indicator-color: #f44336;
+  --mdc-filled-text-field-error-hover-active-indicator-color: #f44336;
+  --mdc-outlined-text-field-caret-color: var(--ch-alt-main);
+  --mdc-outlined-text-field-focus-outline-color: var(--ch-alt-main);
+  --mdc-outlined-text-field-focus-label-text-color: var(--ch-alt-main);
+  --mdc-outlined-text-field-label-text-color: rgba(0, 0, 0, .6);
+  --mdc-outlined-text-field-hover-label-text-color: rgba(0, 0, 0, .6);
+  --mdc-outlined-text-field-disabled-label-text-color: rgba(0, 0, 0, .38);
+  --mdc-outlined-text-field-input-text-color: rgba(0, 0, 0, .87);
+  --mdc-outlined-text-field-disabled-input-text-color: rgba(0, 0, 0, .38);
+  --mdc-outlined-text-field-input-text-placeholder-color: rgba(0, 0, 0, .6);
+  --mdc-outlined-text-field-error-caret-color: #f44336;
+  --mdc-outlined-text-field-error-focus-label-text-color: #f44336;
+  --mdc-outlined-text-field-error-label-text-color: #f44336;
+  --mdc-outlined-text-field-error-hover-label-text-color: #f44336;
+  --mdc-outlined-text-field-outline-color: rgba(0, 0, 0, .38);
+  --mdc-outlined-text-field-disabled-outline-color: rgba(0, 0, 0, .06);
+  --mdc-outlined-text-field-hover-outline-color: rgba(0, 0, 0, .87);
+  --mdc-outlined-text-field-error-focus-outline-color: #f44336;
+  --mdc-outlined-text-field-error-hover-outline-color: #f44336;
+  --mdc-outlined-text-field-error-outline-color: #f44336;
+  --mat-form-field-focus-select-arrow-color: var(--ch-alt-main);
+  --mat-form-field-disabled-input-text-placeholder-color: rgba(0, 0, 0, .38);
+  --mat-form-field-state-layer-color: rgba(0, 0, 0, .87);
+  --mat-form-field-error-text-color: #f44336;
+  --mat-form-field-select-option-text-color: inherit;
+  --mat-form-field-select-disabled-option-text-color: GrayText;
+  --mat-form-field-leading-icon-color: unset;
+  --mat-form-field-disabled-leading-icon-color: unset;
+  --mat-form-field-trailing-icon-color: unset;
+  --mat-form-field-disabled-trailing-icon-color: unset;
+  --mat-form-field-error-focus-trailing-icon-color: unset;
+  --mat-form-field-error-hover-trailing-icon-color: unset;
+  --mat-form-field-error-trailing-icon-color: unset;
+  --mat-form-field-enabled-select-arrow-color: rgba(0, 0, 0, .54);
+  --mat-form-field-disabled-select-arrow-color: rgba(0, 0, 0, .38);
+  --mat-form-field-hover-state-layer-opacity: .04;
+  --mat-form-field-focus-state-layer-opacity: .08;
 }
 
 /* Base typography */
@@ -16,10 +87,11 @@ html, body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
 h1, h2, h3, .h1, .h2, .h3 { letter-spacing: .2px; }
 
 /* Professional navbar */
-.site-navbar { background: var(--brand-dark-2); border-bottom: 1px solid rgba(255,255,255,0.08); }
-.site-navbar .navbar-brand { font-weight: 700; letter-spacing: .3px; }
-.site-navbar .nav-link { opacity: .9; }
-.site-navbar .nav-link:hover, .site-navbar .nav-link.active { opacity: 1; }
+.site-navbar { background: var(--brand-navy-700); border-bottom: 1px solid rgba(255,255,255,0.08); }
+.site-navbar .navbar-brand { font-weight: 700; letter-spacing: .3px; display: flex; align-items: center; gap: .5rem; }
+.site-navbar .navbar-brand img { height: 28px; width: auto; display: inline-block; }
+.site-navbar .nav-link { opacity: .95; }
+.site-navbar .nav-link:hover, .site-navbar .nav-link.active { opacity: 1; color: #fff; }
 
 /* Cards and tables polish */
 .card { border-radius: 12px; border: 1px solid #e5e7eb; }
@@ -28,7 +100,7 @@ h1, h2, h3, .h1, .h2, .h3 { letter-spacing: .2px; }
 
 /* Buttons */
 .btn-primary { background-color: var(--bs-primary); border-color: var(--bs-primary); }
-.btn-primary:hover { background-color: #0f766e; border-color: #0f766e; }
+.btn-primary:hover { background-color: var(--brand-orange-600); border-color: var(--brand-orange-600); }
 .btn-outline-secondary { border-color: #cbd5e1; color: #334155; }
 .btn-outline-secondary:hover { background: #f1f5f9; color: #0f172a; }
 
@@ -37,5 +109,18 @@ footer { background: #ffffff; }
 footer a { color: #0f172a; text-decoration: none; }
 footer a:hover { text-decoration: underline; }
 
-/* Landing hero */
-.hero-gradient { background: radial-gradient(1200px 600px at -10% -10%, #ccfbf1 0%, transparent 60%), radial-gradient(1000px 500px at 110% -10%, #e0f2fe 0%, transparent 60%); }
+/* Brand hero */
+.hero-gradient { background: radial-gradient(1200px 600px at -10% -10%, rgba(229,73,46,.15) 0%, transparent 60%), radial-gradient(1000px 500px at 110% -10%, rgba(255,107,78,.12) 0%, transparent 60%); }
+.hero-brand { background: var(--brand-navy); color: #fff; }
+.hero-brand .lead { color: #d0d6dd; }
+.hero-brand .badge-accent { background: rgba(229,73,46,.15); color: #fff; border: 1px solid rgba(229,73,46,.35); }
+
+/* Cards and subtle accents */
+.card { border-radius: 12px; border: 1px solid #e5e7eb; }
+.card .card-header { border-bottom: 1px solid #eef2f7; }
+
+/* Inputs (give a slight brand focus color) */
+.form-control:focus, .form-select:focus {
+  border-color: var(--brand-orange);
+  box-shadow: 0 0 0 .2rem rgba(229,73,46,.15);
+}

@@ -16,7 +16,25 @@
 {% endblock %}
 
 {% block content %}
-{# Removed hero banner and feature cards per request #}
+{# Brand hero header #}
+<section class="py-5 hero-brand hero-gradient">
+  <div class="container-xl">
+    <div class="row align-items-center g-4">
+      <div class="col-12 col-md-7">
+        <span class="badge rounded-pill badge-accent mb-3">Operations Dashboard</span>
+        <h1 class="h3 text-white fw-bold mb-2">Spirits2U</h1>
+        <p class="lead mb-4">Faster ordering, clear stock visibility, and clean exports — all with a simpler workflow.</p>
+        <div class="d-flex flex-wrap gap-2">
+          <a class="btn btn-primary" href="{% url 'inventory:weekly_list_create' %}"><i class="bi bi-plus-circle me-2"></i>Create New List</a>
+          <a class="btn btn-outline-light" href="{% url 'inventory:product_search' %}"><i class="bi bi-search me-2"></i>Inventory Lookup</a>
+        </div>
+      </div>
+      <div class="col-12 col-md-5 text-center text-md-end">
+        <img src="{% static 'inventory/img/s2u_logo.jpeg' %}" alt="Spirits2U" class="img-fluid" style="max-height:120px; border-radius:8px; box-shadow: 0 8px 24px rgba(0,0,0,.25);">
+      </div>
+    </div>
+  </div>
+</section>
 
 <section class="py-5 bg-light">
     <div class="container-xl">
