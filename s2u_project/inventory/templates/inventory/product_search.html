@@ -4,52 +4,63 @@
 
 {% block extra_head %}
 <style>
-    /* Match brand styling used on Home (navy/orange) */
-    .search-wrap { background: linear-gradient(180deg, rgba(15,26,38,.04), rgba(15,26,38,0) 60%); }
-    .search-card { border: none; border-radius: 16px; box-shadow: 0 20px 50px -30px rgba(229,73,46,.45); }
-    .search-card .card-body { padding: 1rem; }
-    .suggestion-box { position: absolute; top: calc(100% + 0.5rem); left: 0; right: 0; z-index: 30; max-height: 320px; overflow-y: auto; }
-    .suggestion-box.hidden { display: none; }
-    .list-group-item.active, .list-group-item:focus, .list-group-item:hover { background-color: rgba(229,73,46,.08); border-color: rgba(229,73,46,.35); }
-    .badge.bg-success-subtle { background-color: rgba(34,197,94,.18)!important; color:#15803d!important; }
-    .table thead th { white-space: nowrap; text-transform: uppercase; font-size: .75rem; letter-spacing: .05em; }
-    .table tbody td, .table tbody th { vertical-align: middle; font-size: .95rem; }
+  /* Toolbar below navbar, matching brand blue */
+  .search-toolbar { background: var(--brand-navy); color: #fff; }
+  .search-toolbar .title { font-weight: 700; margin: 0; }
+  .search-shell { flex: 1 1 auto; min-width: 340px; }
+  .search-shell .input-group { max-width: 760px; }
+  @media (max-width: 992px) { .search-shell .input-group { max-width: 100%; } }
+
+  /* Suggestions + list styling */
+  .suggestion-box { position: absolute; top: calc(100% + 0.5rem); left: 0; right: 0; z-index: 30; max-height: 320px; overflow-y: auto; }
+  .suggestion-box.hidden { display: none; }
+  .list-group-item.active, .list-group-item:focus, .list-group-item:hover { background-color: rgba(229,73,46,.08); border-color: rgba(229,73,46,.35); }
+
+  /* Results layout polish */
+  .results-card { border: none; border-radius: 12px; box-shadow: 0 16px 40px -28px rgba(0,0,0,.25); }
+  .table thead th { white-space: nowrap; text-transform: uppercase; font-size: .75rem; letter-spacing: .05em; }
+  .table tbody td, .table tbody th { vertical-align: middle; font-size: .95rem; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="search-wrap">
-  <div class="container-xl py-3">
-    <form id="search-form" autocomplete="off">
-      <div class="position-relative">
-        <label for="query" class="form-label text-uppercase small text-secondary fw-semibold">Search Products</label>
+<section class="search-toolbar py-3">
+  <div class="container-xl d-flex flex-wrap align-items-center gap-3">
+    <h1 class="h5 title">Inventory Lookup</h1>
+    <form id="search-form" autocomplete="off" class="d-flex align-items-start gap-2 flex-grow-1">
+      <div class="search-shell position-relative">
+        <label for="query" class="visually-hidden">Search Products</label>
         <div class="input-group input-group-lg shadow-sm">
           <span class="input-group-text bg-white border-end-0"><i class="bi bi-upc-scan"></i></span>
-          <input type="text" id="query" name="q" value="{{ query }}" class="form-control border-start-0" placeholder="e.g. 085592157158 or Tito's">
-          <button id="refresh-stock" type="button" class="btn btn-outline-primary">
-            <span class="spinner-border spinner-border-sm me-2 d-none" role="status" aria-hidden="true"></span>
-            <i class="bi bi-arrow-clockwise me-1"></i>Refresh Stock & Monthly
-          </button>
+          <input type="text" id="query" name="q" value="{{ query }}" class="form-control border-start-0" placeholder="e.g. 085592157158 or Tito's" aria-label="Search products by name or barcode">
         </div>
         <div id="suggestion-box" class="suggestion-box hidden">
           <div class="list-group shadow" id="suggestion-list"></div>
         </div>
       </div>
+      <button id="refresh-stock" type="button" class="btn btn-outline-light">
+        <span class="spinner-border spinner-border-sm me-2 d-none" role="status" aria-hidden="true"></span>
+        <i class="bi bi-arrow-clockwise me-1"></i>Refresh Stock & Monthly
+      </button>
     </form>
   </div>
-</div>
+ </section>
 
 <div class="container-xl py-4 py-lg-5">
   <div class="row justify-content-center">
-    <div class="col-12 col-xl-9">
-      <div id="feedback" class="alert alert-light border-start border-4 border-primary-subtle shadow-sm" role="alert">
+    <div class="col-12 col-xl-10">
+      <div id="feedback" class="alert alert-light border-0 results-card" role="alert">
         <i class="bi bi-info-circle me-2 text-primary"></i>
         Start typing or scan a barcode to see matching products.
       </div>
 
-      <div class="selected-container mt-5">
-        <h2 class="h4 mb-3"><i class="bi bi-grid-3x3-gap me-2 text-primary"></i>Selected Products</h2>
-        <div class="table-responsive">
+      <div class="selected-container mt-4">
+        <div class="card results-card">
+          <div class="card-header bg-white border-0">
+            <h2 class="h6 mb-0"><i class="bi bi-grid-3x3-gap me-2 text-primary"></i>Selected Products</h2>
+          </div>
+          <div class="card-body p-0">
+            <div class="table-responsive">
           <table class="table table-striped align-middle d-none" id="selected-table">
             <thead class="table-light">
               <tr>
@@ -65,10 +76,14 @@
             </thead>
             <tbody id="selected-list"></tbody>
           </table>
+            </div>
+            <div class="p-3">
+              <p id="selected-empty" class="empty m-0">
+                <i class="bi bi-bag"></i> <span>Start typing or scan a barcode to add products.</span>
+              </p>
+            </div>
+          </div>
         </div>
-        <p id="selected-empty" class="empty">
-          <i class="bi bi-bag"></i> Start typing or scan a barcode to add products.
-        </p>
       </div>
     </div>
   </div>
