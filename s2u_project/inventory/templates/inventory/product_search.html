@@ -14,12 +14,29 @@
   /* Suggestions + list styling */
   .suggestion-box { position: absolute; top: calc(100% + 0.5rem); left: 0; right: 0; z-index: 30; max-height: 320px; overflow-y: auto; }
   .suggestion-box.hidden { display: none; }
-  .list-group-item.active, .list-group-item:focus, .list-group-item:hover { background-color: rgba(229,73,46,.08); border-color: rgba(229,73,46,.35); }
+  /* Make suggestions fully opaque so background doesn't bleed through */
+  .suggestion-box .list-group { background:#fff; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; box-shadow:0 16px 40px -20px rgba(0,0,0,.25); }
+  .suggestion-box .list-group-item { background:#fff; border-color:#eef2f7; }
+  .suggestion-box .list-group-item.active,
+  .suggestion-box .list-group-item:focus,
+  .suggestion-box .list-group-item:hover {
+    background-color:#fff;
+    border-color:#eef2f7;
+    box-shadow: inset 3px 0 0 0 var(--brand-orange);
+  }
 
   /* Results layout polish */
   .results-card { border: none; border-radius: 12px; box-shadow: 0 16px 40px -28px rgba(0,0,0,.25); }
   .table thead th { white-space: nowrap; text-transform: uppercase; font-size: .75rem; letter-spacing: .05em; }
   .table tbody td, .table tbody th { vertical-align: middle; font-size: .95rem; }
+
+  /* Refresh button hover: use brand orange, not solid fill */
+  .search-toolbar .btn-outline-light:hover,
+  .search-toolbar .btn-outline-light:focus-visible {
+    background-color: rgba(229,73,46,.12); /* subtle orange wash */
+    border-color: var(--brand-orange);
+    color: var(--brand-orange);
+  }
 </style>
 {% endblock %}
 
