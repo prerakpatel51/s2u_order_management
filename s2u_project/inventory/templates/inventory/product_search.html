@@ -4,125 +4,74 @@
 
 {% block extra_head %}
 <style>
-    body {
-        background: radial-gradient(circle at 20% 20%, #f3f7ff, #eef3ff 45%, #ffffff 75%);
-    }
-    .search-card {
-        border: none;
-        border-radius: 24px;
-        box-shadow: 0 32px 60px -45px rgba(37, 99, 235, 0.65);
-    }
-    .search-card .card-body {
-        padding: clamp(2rem, 6vw, 3rem);
-    }
-    .suggestion-box {
-        position: absolute;
-        top: calc(100% + 0.5rem);
-        left: 0;
-        right: 0;
-        z-index: 30;
-        max-height: 320px;
-        overflow-y: auto;
-    }
-    .suggestion-box.hidden {
-        display: none;
-    }
-    .list-group-item.active,
-    .list-group-item:focus,
-    .list-group-item:hover {
-        background-color: #e6efff;
-        border-color: rgba(37, 99, 235, 0.35);
-    }
-    .badge.bg-success-subtle {
-        background-color: rgba(34, 197, 94, 0.18) !important;
-        color: #15803d !important;
-    }
-    .table thead th {
-        white-space: nowrap;
-        text-transform: uppercase;
-        font-size: 0.75rem;
-        letter-spacing: 0.05em;
-    }
-    .table tbody td,
-    .table tbody th {
-        vertical-align: middle;
-        font-size: 0.95rem;
-    }
+    /* Match brand styling used on Home (navy/orange) */
+    .search-wrap { background: linear-gradient(180deg, rgba(15,26,38,.04), rgba(15,26,38,0) 60%); }
+    .search-card { border: none; border-radius: 16px; box-shadow: 0 20px 50px -30px rgba(229,73,46,.45); }
+    .search-card .card-body { padding: 1rem; }
+    .suggestion-box { position: absolute; top: calc(100% + 0.5rem); left: 0; right: 0; z-index: 30; max-height: 320px; overflow-y: auto; }
+    .suggestion-box.hidden { display: none; }
+    .list-group-item.active, .list-group-item:focus, .list-group-item:hover { background-color: rgba(229,73,46,.08); border-color: rgba(229,73,46,.35); }
+    .badge.bg-success-subtle { background-color: rgba(34,197,94,.18)!important; color:#15803d!important; }
+    .table thead th { white-space: nowrap; text-transform: uppercase; font-size: .75rem; letter-spacing: .05em; }
+    .table tbody td, .table tbody th { vertical-align: middle; font-size: .95rem; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-xl py-4 py-lg-5">
-    <div class="row justify-content-center">
-        <div class="col-12 col-xl-9">
-            <div class="card search-card mb-4">
-                <div class="card-body">
-                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
-                        <div>
-                            <span class="badge bg-primary-subtle text-primary mb-3"><i class="bi bi-box-seam me-1"></i>Inventory Tools</span>
-                            <h1 class="h3 fw-bold text-primary mb-2">Inventory Lookup</h1>
-                            <p class="text-secondary mb-0">Scan a barcode or type part of a product name to view live stock across every store.</p>
-                        </div>
-                        <button id="refresh-stock" type="button" class="btn btn-outline-primary btn-sm">
-                            <span class="spinner-border spinner-border-sm me-2 d-none" role="status" aria-hidden="true"></span>
-                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh Stock & Monthly Needed
-                        </button>
-                    </div>
-
-                    <form id="search-form" autocomplete="off">
-                        <div class="position-relative">
-                            <label for="query" class="form-label text-uppercase small text-secondary fw-semibold">Search Products</label>
-                            <div class="input-group input-group-lg shadow-sm">
-                                <span class="input-group-text bg-white border-end-0"><i class="bi bi-upc-scan"></i></span>
-                                <input
-                                    type="text"
-                                    id="query"
-                                    name="q"
-                                    value="{{ query }}"
-                                    class="form-control border-start-0"
-                                    placeholder="e.g. 085592157158 or Tito's"
-                                >
-                            </div>
-                            <div id="suggestion-box" class="suggestion-box hidden">
-                                <div class="list-group shadow" id="suggestion-list"></div>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-            </div>
-
-            <div id="feedback" class="alert alert-light border-start border-4 border-primary-subtle shadow-sm" role="alert">
-                <i class="bi bi-info-circle me-2 text-primary"></i>
-                Start typing or scan a barcode to see matching products.
-            </div>
-
-            <div class="selected-container mt-5">
-                <h2 class="h4 mb-3">
-                    <i class="bi bi-grid-3x3-gap me-2 text-primary"></i>Selected Products
-                </h2>
-                <div class="table-responsive">
-                    <table class="table table-striped align-middle d-none" id="selected-table">
-                        <thead class="table-light">
-                            <tr>
-                                <th scope="col">#</th>
-                                <th scope="col">Product Name</th>
-                                <th scope="col">Barcode</th>
-                                <th scope="col">Supplier</th>
-                                {% for store in stores %}
-                                <th scope="col" class="text-center" title="{{ store.name }}">{{ store.number }}</th>
-                                {% endfor %}
-                                <th scope="col" class="text-center">Remove</th>
-                            </tr>
-                        </thead>
-                        <tbody id="selected-list"></tbody>
-                    </table>
-                </div>
-                <p id="selected-empty" class="empty">
-                    <i class="bi bi-bag"></i> Start typing or scan a barcode to add products.
-                </p>
-            </div>
+<div class="search-wrap">
+  <div class="container-xl py-3">
+    <form id="search-form" autocomplete="off">
+      <div class="position-relative">
+        <label for="query" class="form-label text-uppercase small text-secondary fw-semibold">Search Products</label>
+        <div class="input-group input-group-lg shadow-sm">
+          <span class="input-group-text bg-white border-end-0"><i class="bi bi-upc-scan"></i></span>
+          <input type="text" id="query" name="q" value="{{ query }}" class="form-control border-start-0" placeholder="e.g. 085592157158 or Tito's">
+          <button id="refresh-stock" type="button" class="btn btn-outline-primary">
+            <span class="spinner-border spinner-border-sm me-2 d-none" role="status" aria-hidden="true"></span>
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh Stock & Monthly
+          </button>
         </div>
+        <div id="suggestion-box" class="suggestion-box hidden">
+          <div class="list-group shadow" id="suggestion-list"></div>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="container-xl py-4 py-lg-5">
+  <div class="row justify-content-center">
+    <div class="col-12 col-xl-9">
+      <div id="feedback" class="alert alert-light border-start border-4 border-primary-subtle shadow-sm" role="alert">
+        <i class="bi bi-info-circle me-2 text-primary"></i>
+        Start typing or scan a barcode to see matching products.
+      </div>
+
+      <div class="selected-container mt-5">
+        <h2 class="h4 mb-3"><i class="bi bi-grid-3x3-gap me-2 text-primary"></i>Selected Products</h2>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle d-none" id="selected-table">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Product Name</th>
+                <th scope="col">Barcode</th>
+                <th scope="col">Supplier</th>
+                {% for store in stores %}
+                <th scope="col" class="text-center" title="{{ store.name }}">{{ store.number }}</th>
+                {% endfor %}
+                <th scope="col" class="text-center">Remove</th>
+              </tr>
+            </thead>
+            <tbody id="selected-list"></tbody>
+          </table>
+        </div>
+        <p id="selected-empty" class="empty">
+          <i class="bi bi-bag"></i> Start typing or scan a barcode to add products.
+        </p>
+      </div>
     </div>
+  </div>
 </div>
 
 <script id="stores-data" type="application/json">{{ store_data_json|safe }}</script>
