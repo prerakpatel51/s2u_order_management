@@ -226,7 +226,10 @@ class Command(BaseCommand):
             to_add = desired_codes - existing
             to_delete = existing - desired_codes
             if to_add:
-                ProductBarcode.objects.bulk_create([ProductBarcode(product=product_obj, code=code) for code in to_add])
+                ProductBarcode.objects.bulk_create(
+                    [ProductBarcode(product=product_obj, code=code) for code in to_add],
+                    ignore_conflicts=True,
+                )
             if to_delete:
                 ProductBarcode.objects.filter(product=product_obj, code__in=list(to_delete)).delete()
 
