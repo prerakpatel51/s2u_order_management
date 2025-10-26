@@ -458,6 +458,10 @@
         selectedProducts.set(key, {
             ...product,
             stocks: stockEntries,
+            // prefer barcodes from stock payload; fallback to suggestion payload
+            barcodes: Array.isArray(stockPayload?.barcodes)
+                ? stockPayload.barcodes
+                : (Array.isArray(product.barcodes) ? product.barcodes : (product.barcode ? [product.barcode] : [])),
             monthly_sales: {},
         });
 

@@ -21,7 +21,7 @@ from django_ratelimit.decorators import ratelimit
 from .korona import fetch_product_stocks
 
 logger = logging.getLogger(__name__)
-from .models import Product, ProductStock, Store
+from .models import Product, ProductStock, Store, ProductBarcode
 from django.utils import timezone
 from django.contrib import messages
 from django.contrib.auth import get_user_model
@@ -1469,6 +1469,7 @@ def weekly_add_item_api(request, list_id):
                 "product_number": product.number,
                 "product_name": product.name,
                 "barcode": product.barcode,
+                "barcodes": list(ProductBarcode.objects.filter(product=product).values_list("code", flat=True)) if 'ProductBarcode' in globals() else [],
                 "supplier_name": product.supplier_name,
                 "on_shelf": item.on_shelf,
                 "monthly_needed": item.monthly_needed,
@@ -1568,6 +1569,7 @@ def weekly_update_item_api(request, list_id, item_id):
                 "product_number": item.product.number,
                 "product_name": item.product.name,
                 "barcode": item.product.barcode,
+                "barcodes": list(ProductBarcode.objects.filter(product=item.product).values_list("code", flat=True)) if 'ProductBarcode' in globals() else [],
                 "supplier_name": item.product.supplier_name,
                 "on_shelf": item.on_shelf,
                 "monthly_needed": item.monthly_needed,
