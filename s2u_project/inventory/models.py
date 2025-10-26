@@ -46,6 +46,24 @@ class Product(models.Model):
         return f"{self.number} - {self.name}"
 
 
+class ProductBarcode(models.Model):
+    """Additional barcodes for a product (Korona may return multiple)."""
+
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="barcodes",
+    )
+    code = models.CharField(max_length=64)
+
+    class Meta:
+        unique_together = ("product", "code")
+        indexes = [models.Index(fields=["code"])]
+
+    def __str__(self) -> str:
+        return f"{self.product.number}: {self.code}"
+
+
 class ProductStock(models.Model):
     """Inventory quantities for a product at a particular store."""
 

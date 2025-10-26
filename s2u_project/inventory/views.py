@@ -204,13 +204,13 @@ def _search_products(query: str) -> Tuple[List[Product], List[Product]]:
                     regex_pattern = "[^a-zA-Z0-9]*".join(pattern_chars)
                     filters |= Q(name__iregex=regex_pattern)
 
-    exact_q = Q(barcode__iexact=query)
+    exact_q = Q(barcode__iexact=query) | Q(barcodes__code__iexact=query)
     if query.isdigit():
         exact_q |= Q(number=int(query))
     normalized_query = _normalize(query)
 
     candidates = (
-        Product.objects.filter(filters | exact_q)
+        Product.objects.filter(filters | exact_q | Q(barcodes__code__icontains=query))
         .distinct()
         .only("number", "name", "barcode", "supplier_name")
     )
@@ -632,11 +632,24 @@ def product_stock_api(request):
     ProductStock.objects.filter(product=product).exclude(store__pk__in=seen_store_ids).delete()
     stock_entries.sort(key=lambda entry: (entry["store"].get("name") or "").lower())
 
+    # Build barcodes list (primary + additional)
+    try:
+        extra_codes = list(product.barcodes.values_list('code', flat=True))  # type: ignore[attr-defined]
+    except Exception:
+        extra_codes = []
+    barcodes = []
+    if product.barcode:
+        barcodes.append(product.barcode)
+    for code in extra_codes:
+        if code and code not in barcodes:
+            barcodes.append(code)
+
     return JsonResponse(
         {
             "product": {"number": product.number, "name": product.name},
             "stocks": stock_entries,
             "cached": api_failed,
+            "barcodes": barcodes,
         }
     )
 
@@ -1172,7 +1185,7 @@ def weekly_list_detail(request, list_id):
     if order_list.finalized_at:
         # Sort: transfers first (with transfer_from set), then by product name
         from django.db.models import Case, When, Value, IntegerField
-        items = order_list.items.select_related("product", "transfer_from").annotate(
+        items = order_list.items.select_related("product", "transfer_from").prefetch_related("product__barcodes").annotate(
             has_transfer=Case(
                 When(transfer_from__isnull=False, transfer_bottles__gt=0, then=Value(0)),
                 default=Value(1),
@@ -1180,7 +1193,7 @@ def weekly_list_detail(request, list_id):
             )
         ).order_by('has_transfer', 'product__name')
     else:
-        items = order_list.items.select_related("product", "transfer_from").all()
+        items = order_list.items.select_related("product", "transfer_from").prefetch_related("product__barcodes").all()
 
     # Only load other store stocks for admins
     other_stores_qs = Store.objects.none()
@@ -1234,6 +1247,7 @@ def weekly_list_detail(request, list_id):
                 "product_number": item.product.number,
                 "product_name": item.product.name,
                 "barcode": item.product.barcode,
+                "barcodes": [b.code for b in getattr(item.product, 'barcodes').all()] if hasattr(item.product, 'barcodes') else ([item.product.barcode] if item.product.barcode else []),
                 "supplier_name": item.product.supplier_name,
                 "on_shelf": item.on_shelf,
                 "monthly_needed": item.monthly_needed,

@@ -227,7 +227,13 @@
                 <tr>
                     <th scope="row" class="align-middle">${product.number}</th>
                     <td class="align-middle">${product.name}</td>
-                    <td class="align-middle">${product.barcode || '—'}</td>
+                    <td class="align-middle">
+                        ${(() => {
+                            const arr = Array.isArray(product.barcodes) ? product.barcodes : (product.barcode ? [product.barcode] : []);
+                            if (!arr.length) return '—';
+                            return arr.map(c => `<div class="small text-muted">${c}</div>`).join('');
+                        })()}
+                    </td>
                     <td class="align-middle">${product.supplier_name || '—'}</td>
                     ${storeCells}
                     <td class="text-center align-middle">
@@ -367,6 +373,7 @@
                 selectedProducts.set(String(product.number), {
                     ...product,
                     stocks: stockPayload.stocks || [],
+                    barcodes: Array.isArray(stockPayload.barcodes) ? stockPayload.barcodes : (product.barcodes || (product.barcode ? [product.barcode] : [])),
                 });
 
                 refreshed++;

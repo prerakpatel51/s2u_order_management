@@ -535,7 +535,13 @@
                 <tr data-id="${item.id}" class="${transferHighlight}">
                     <th scope="row" class="align-middle">${item.product_number}</th>
                     <td class="align-middle truncate">${item.product_name}</td>
-                    <td class="align-middle truncate">${item.barcode || '—'}</td>
+                    <td class="align-middle truncate">
+                        ${(() => {
+                            const arr = Array.isArray(item.barcodes) ? item.barcodes : (item.barcode ? [item.barcode] : []);
+                            if (!arr.length) return '—';
+                            return arr.map(c => `<div class="small text-muted">${escapeAttr(c)}</div>`).join('');
+                        })()}
+                    </td>
                     <td class="align-middle"><span class="sup-badge" data-bs-toggle="tooltip" data-bs-placement="top" title="${supFull}">${supAbbr}</span></td>
                     <td class=\"text-center numeric sc-current\"><div>${systemStock}</div>${monthlySalesDisplay}</td>
                     <td class="text-center sc-current">

@@ -7,11 +7,11 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from inventory.korona import iter_paginated
-from inventory.models import Product
+from inventory.models import Product, ProductBarcode
 
 
-def extract_barcode(product: dict) -> str:
-    """Extract a barcode string from a Korona product payload.
+def extract_barcodes(product: dict) -> list[str]:
+    """Extract all barcodes from a Korona product payload.
 
     Args:
         product: Raw product dict as returned by the Korona API.
@@ -23,14 +23,19 @@ def extract_barcode(product: dict) -> str:
         >>> extract_barcode({"codes": [{"productCode": "0123456789"}]})
         '0123456789'
     """
-    codes = product.get("codes")
-    if isinstance(codes, list) and codes:
-        first = codes[0]
-        if isinstance(first, dict):
-            return str(first.get("productCode", "")).strip()
-        if isinstance(first, str):
-            return first.strip()
-    return ""
+    seen = []
+    codes = product.get("codes") or []
+    if isinstance(codes, list):
+        for entry in codes:
+            code = None
+            if isinstance(entry, dict):
+                code = entry.get("productCode")
+            elif isinstance(entry, str):
+                code = entry
+            code = str(code or "").strip()
+            if code and code not in seen:
+                seen.append(code)
+    return seen
 
 
 def extract_supplier(product: dict) -> str:
@@ -57,7 +62,7 @@ def extract_supplier(product: dict) -> str:
     return ""
 
 
-def fetch_products() -> List[Dict[str, str]]:
+def fetch_products() -> List[Dict[str, object]]:
     """Fetch all products from Korona and normalize fields for storage.
 
     Returns:
@@ -75,7 +80,7 @@ def fetch_products() -> List[Dict[str, str]]:
                 "id": product.get("id"),
                 "number": str(product.get("number", "")).strip(),
                 "name": str(product.get("name", "")).strip(),
-                "barcode": extract_barcode(product),
+                "barcodes": extract_barcodes(product),
                 "supplier_name": extract_supplier(product),
             }
         )
@@ -165,7 +170,11 @@ class Command(BaseCommand):
         for row in products:
             number_raw = row.get("number")
             name = str(row.get("name", "")).strip()
-            barcode = str(row.get("barcode", "")).strip()
+            # Primary barcode = first of list, for backward compatibility
+            barcodes_list = row.get("barcodes") or []
+            first_barcode = ""
+            if isinstance(barcodes_list, list) and barcodes_list:
+                first_barcode = str(barcodes_list[0]).strip()
             supplier_name = str(row.get("supplier_name", "")).strip()
             korona_id = row.get("id")
 
@@ -182,7 +191,7 @@ class Command(BaseCommand):
 
             defaults = {
                 "name": name,
-                "barcode": barcode,
+                "barcode": first_barcode,
                 "supplier_name": supplier_name,
             }
 
@@ -194,7 +203,7 @@ class Command(BaseCommand):
                         f"Invalid Korona UUID for product {number}: {korona_id}"
                     )
 
-            _, was_created = Product.objects.update_or_create(
+            product_obj, was_created = Product.objects.update_or_create(
                 number=number,
                 defaults=defaults,
             )
@@ -202,5 +211,23 @@ class Command(BaseCommand):
                 created += 1
             else:
                 updated += 1
+
+            # Sync additional barcodes table
+            desired_codes = set()
+            for c in (barcodes_list or []):
+                c = str(c or "").strip()
+                if c:
+                    desired_codes.add(c)
+            # Ensure the primary barcode is included if present
+            if first_barcode:
+                desired_codes.add(first_barcode)
+
+            existing = set(ProductBarcode.objects.filter(product=product_obj).values_list("code", flat=True))
+            to_add = desired_codes - existing
+            to_delete = existing - desired_codes
+            if to_add:
+                ProductBarcode.objects.bulk_create([ProductBarcode(product=product_obj, code=code) for code in to_add])
+            if to_delete:
+                ProductBarcode.objects.filter(product=product_obj, code__in=list(to_delete)).delete()
 
         return created, updated
