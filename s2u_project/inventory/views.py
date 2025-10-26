@@ -797,7 +797,6 @@ def refresh_all_status_api(request):
     return JsonResponse({"ok": True, **data})
 
 
-@ratelimit(key='user_or_ip', rate='900/m', method='GET', block=True)
 @login_required
 @require_GET
 def monthly_sales_api(request):
@@ -968,7 +967,6 @@ def monthly_sales_api(request):
     return resp
 
 
-@ratelimit(key='user_or_ip', rate='120/m', method='GET', block=True)
 @login_required
 @require_GET
 def monthly_sales_bulk_api(request):

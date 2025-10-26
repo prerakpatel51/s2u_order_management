@@ -1289,27 +1289,19 @@
                     await new Promise(resolve => setTimeout(resolve, 100));
                 }
 
-                // Step 4: Fetch monthly sales for all items (async, in batches)
+                // Step 4: Fetch monthly sales for all items (sequential, no pacing)
                 currentStep = 4;
                 let salesUpdated = 0;
                 let salesFailed = 0;
-                showFeedback('info', `<i class="bi bi-arrow-clockwise me-2"></i>[${currentStep}/${totalSteps}] Fetching monthly sales data...`);
-
-                // Process in batches with bulk endpoint to reduce calls
-                const batchSize = 10;
-                for (let i = 0; i < weeklyItems.length; i += batchSize) {
-                    const batch = weeklyItems.slice(i, i + batchSize);
+                showFeedback('info', `<i class="bi bi-arrow-clockwise me-2"></i>[${currentStep}/${totalSteps}] Fetching monthly sales data (sequential)...`);
+                for (let i = 0; i < weeklyItems.length; i++) {
+                    const item = weeklyItems[i];
                     try {
-                        await fetchMonthlySalesBulk(batch.map(it => it.product_number), true);
-                        salesUpdated += batch.length;
+                        await fetchMonthlySales(item.product_number, true);
+                        salesUpdated++;
                     } catch (error) {
-                        console.error('Bulk monthly fetch failed:', error);
-                        salesFailed += batch.length;
-                    }
-
-                    // Delay between batches
-                    if (i + batchSize < weeklyItems.length) {
-                        await new Promise(resolve => setTimeout(resolve, 800));
+                        console.error(`Failed to fetch monthly sales for ${item.product_name}:`, error);
+                        salesFailed++;
                     }
                 }
 
@@ -1374,19 +1366,14 @@
     applyBarcodePreference();
     applyOtherStocksPreference();
 
-    // Load monthly sales data for existing items in background (non-blocking)
+    // Load monthly sales data for existing items in background (sequential)
     (async function loadInitialMonthlySales() {
         const weeklyItems = Array.from(items.values());
         if (weeklyItems.length === 0) return;
 
-        // Use bulk endpoint to reduce round-trips
-        const batchSize = 10;
-        for (let i = 0; i < weeklyItems.length; i += batchSize) {
-            const batch = weeklyItems.slice(i, i + batchSize);
-            await fetchMonthlySalesBulk(batch.map(it => it.product_number), false);
-            if (i + batchSize < weeklyItems.length) {
-                await new Promise(resolve => setTimeout(resolve, 800));
-            }
+        for (let i = 0; i < weeklyItems.length; i++) {
+            const it = weeklyItems[i];
+            await fetchMonthlySales(it.product_number, false);
         }
     })();
 
