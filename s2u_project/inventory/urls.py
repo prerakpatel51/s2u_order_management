@@ -11,6 +11,7 @@ urlpatterns = [
     path("api/stock/", views.product_stock_api, name="product_stock_api"),
     path("api/products/refresh/", views.product_refresh_api, name="product_refresh_api"),
     path("api/monthly-sales/", views.monthly_sales_api, name="monthly_sales_api"),
+    path("api/monthly-sales/bulk/", views.monthly_sales_bulk_api, name="monthly_sales_bulk_api"),
     # Global refresh orchestration (async)
     path("api/refresh/start/", views.refresh_all_start_api, name="refresh_all_start"),
     path("api/refresh/status/", views.refresh_all_status_api, name="refresh_all_status"),

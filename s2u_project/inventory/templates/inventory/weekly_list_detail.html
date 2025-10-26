@@ -1223,10 +1223,11 @@
                 currentStep = 2;
                 showFeedback('info', `<i class="bi bi-arrow-clockwise me-2"></i>[${currentStep}/${totalSteps}] Syncing products from Korona API...`);
 
-                const productsResponse = await fetch(`{% url 'inventory:product_refresh_api' %}`);
-                if (!productsResponse.ok) {
-                    throw new Error('Failed to sync products');
+                const productsResponse = await fetch(`{% url 'inventory:product_refresh_api' %}?async=1`);
+                if (!productsResponse.ok && productsResponse.status !== 202) {
+                    throw new Error(`Failed to sync products (HTTP ${productsResponse.status})`);
                 }
+                // If queued (202), proceed without waiting
                 const productsData = await productsResponse.json();
                 console.log('Products synced:', productsData.total);
 
@@ -1288,24 +1289,21 @@
                 let salesFailed = 0;
                 showFeedback('info', `<i class="bi bi-arrow-clockwise me-2"></i>[${currentStep}/${totalSteps}] Fetching monthly sales data...`);
 
-                // Process in batches with pacing to respect API rate limits
-                const batchSize = 5;
+                // Process in batches with bulk endpoint to reduce calls
+                const batchSize = 10;
                 for (let i = 0; i < weeklyItems.length; i += batchSize) {
                     const batch = weeklyItems.slice(i, i + batchSize);
-                    const promises = batch.map(async (item) => {
-                        try {
-                            await fetchMonthlySales(item.product_number, true); // force refresh
-                            salesUpdated++;
-                        } catch (error) {
-                            console.error(`Failed to fetch monthly sales for ${item.product_name}:`, error);
-                            salesFailed++;
-                        }
-                    });
-                    await Promise.all(promises);
+                    try {
+                        await fetchMonthlySalesBulk(batch.map(it => it.product_number), true);
+                        salesUpdated += batch.length;
+                    } catch (error) {
+                        console.error('Bulk monthly fetch failed:', error);
+                        salesFailed += batch.length;
+                    }
 
-                    // Delay between batches (~5 req/s ~= 300/min)
+                    // Delay between batches
                     if (i + batchSize < weeklyItems.length) {
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        await new Promise(resolve => setTimeout(resolve, 800));
                     }
                 }
 
@@ -1375,16 +1373,13 @@
         const weeklyItems = Array.from(items.values());
         if (weeklyItems.length === 0) return;
 
-        // Process in batches with pacing to respect API rate limits
-        const batchSize = 5;
+        // Use bulk endpoint to reduce round-trips
+        const batchSize = 10;
         for (let i = 0; i < weeklyItems.length; i += batchSize) {
             const batch = weeklyItems.slice(i, i + batchSize);
-            const promises = batch.map(item => fetchMonthlySales(item.product_number));
-            await Promise.all(promises);
-
-            // ~1s delay → ~5 req/s ≈ 300/min
+            await fetchMonthlySalesBulk(batch.map(it => it.product_number), false);
             if (i + batchSize < weeklyItems.length) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, 800));
             }
         }
     })();

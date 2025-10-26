@@ -641,7 +641,7 @@ def product_stock_api(request):
     )
 
 
-@ratelimit(key='user_or_ip', rate='10/m', method='GET', block=True)
+@ratelimit(key='user_or_ip', rate='60/m', method='GET', block=True)
 @login_required
 @require_GET
 def product_refresh_api(request):
@@ -654,18 +654,43 @@ def product_refresh_api(request):
         GET /api/products/refresh/?sync=stores
     """
     sync_type = request.GET.get('sync', 'products')
+    async_mode = request.GET.get('async') == '1'
 
     try:
         if sync_type == 'stores':
             # Sync organizational units (stores)
+            if async_mode:
+                threading.Thread(target=lambda: call_command("sync_stores"), daemon=True).start()
+                total = Store.objects.filter(active=True).count()
+                return JsonResponse({"ok": True, "queued": True, "total": total, "type": "stores"}, status=202)
             call_command("sync_stores")
             total = Store.objects.filter(active=True).count()
             return JsonResponse({"ok": True, "total": total, "type": "stores"})
         else:
             # Default: sync products
-            call_command("load_products", skip_csv=True)
-            total = Product.objects.count()
-            return JsonResponse({"ok": True, "total": total, "type": "products"})
+            # Prevent concurrent/too‑frequent syncs
+            lock_key = "product_refresh:lock"
+            if async_mode:
+                try:
+                    got = redis_setnx(lock_key, "1", ex=900)
+                except Exception:
+                    got = True
+                if got:
+                    def _worker():
+                        try:
+                            call_command("load_products", skip_csv=True)
+                        finally:
+                            try:
+                                redis_delete(lock_key)
+                            except Exception:
+                                pass
+                    threading.Thread(target=_worker, daemon=True).start()
+                total = Product.objects.count()
+                return JsonResponse({"ok": True, "queued": True, "total": total, "type": "products"}, status=202)
+            else:
+                call_command("load_products", skip_csv=True)
+                total = Product.objects.count()
+                return JsonResponse({"ok": True, "total": total, "type": "products"})
     except Exception as exc:  # pylint: disable=broad-except
         return JsonResponse(
             {"ok": False, "error": f"Failed to refresh {sync_type}: {exc}"}, status=500
@@ -759,7 +784,7 @@ def refresh_all_status_api(request):
     return JsonResponse({"ok": True, **data})
 
 
-@ratelimit(key='user_or_ip', rate='300/m', method='GET', block=True)
+@ratelimit(key='user_or_ip', rate='900/m', method='GET', block=True)
 @login_required
 @require_GET
 def monthly_sales_api(request):
@@ -927,6 +952,148 @@ def monthly_sales_api(request):
         resp["Cache-Control"] = "no-store"
     else:
         resp["Cache-Control"] = "private, max-age=60, stale-while-revalidate=120"
+    return resp
+
+
+@ratelimit(key='user_or_ip', rate='120/m', method='GET', block=True)
+@login_required
+@require_GET
+def monthly_sales_bulk_api(request):
+    """Return monthly sales for multiple products in one call.
+
+    Query params:
+      - products: comma-separated product numbers (required)
+      - stores: comma-separated store IDs (optional, defaults to all active)
+      - force: '1' to bypass cache (optional)
+
+    Response:
+      {
+        "sales": { "<product_number>": { "<store_id>": qty, ... }, ... },
+        "missing": [<product_number>...]
+      }
+    """
+    from .models import MonthlySales
+    import json as _json
+    import hashlib as _hashlib
+
+    products_param = (request.GET.get("products") or "").strip()
+    if not products_param:
+        return JsonResponse({"error": "Parameter 'products' is required."}, status=400)
+
+    # Parse and de-duplicate product numbers
+    try:
+        product_numbers = list({int(p.strip()) for p in products_param.split(',') if p.strip()})
+    except ValueError:
+        return JsonResponse({"error": "Invalid 'products' list."}, status=400)
+
+    # Hard cap per request to keep latency reasonable
+    if len(product_numbers) > 500:
+        return JsonResponse({"error": "Too many products; max 500 per request."}, status=400)
+
+    stores_param = (request.GET.get("stores") or "").strip()
+    force_refresh = request.GET.get("force") == "1"
+
+    # Resolve stores
+    if stores_param:
+        try:
+            store_ids = [int(s.strip()) for s in stores_param.split(',') if s.strip()]
+        except ValueError:
+            return JsonResponse({"error": "Invalid 'stores' list."}, status=400)
+        stores = Store.objects.filter(pk__in=store_ids, active=True)
+    else:
+        stores = Store.objects.filter(active=True)
+
+    stores_with_korona = [s for s in stores if s.korona_id]
+    if not stores_with_korona:
+        return JsonResponse({"sales": {}, "missing": product_numbers})
+
+    # Fetch Products
+    products = {p.number: p for p in Product.objects.filter(number__in=product_numbers)}
+    missing = [n for n in product_numbers if n not in products]
+
+    from .redis_client import r as redis_client
+    sales_out: dict[int, dict[int, int]] = {}
+
+    # First pass: try Redis and DB cache
+    stores_needing: dict[int, list[Store]] = {}
+
+    from datetime import timedelta
+    fresh_cutoff = timezone.now() - timedelta(minutes=30)
+
+    for num, product in products.items():
+        if not product.korona_id:
+            missing.append(num)
+            continue
+        sales_out[num] = {}
+        if not force_refresh:
+            for st in stores_with_korona:
+                # Redis
+                redis_key = f"monthly_sales:{num}:{st.id}"
+                cached_val = redis_client.get(redis_key)
+                if cached_val is not None and str(cached_val).isdigit():
+                    sales_out[num][st.id] = int(cached_val)
+                    continue
+                # DB cache
+                try:
+                    ms = MonthlySales.objects.only("quantity_sold", "calculated_at").get(product=product, store=st)
+                    if ms.calculated_at >= fresh_cutoff:
+                        sales_out[num][st.id] = int(ms.quantity_sold)
+                        redis_client.set(redis_key, int(ms.quantity_sold), ex=3600)
+                        continue
+                except MonthlySales.DoesNotExist:
+                    pass
+                # needs calc
+                stores_needing.setdefault(num, []).append(st)
+        else:
+            stores_needing[num] = stores_with_korona.copy()
+
+    # Second pass: calculate missing/stale using Korona in a per-product bulk call
+    from .korona import calculate_monthly_sales_bulk
+    for num, need_list in stores_needing.items():
+        product = products.get(num)
+        if not product or not need_list:
+            continue
+        try:
+            bulk_sales = calculate_monthly_sales_bulk(
+                str(product.korona_id),
+                [(s.id, str(s.korona_id)) for s in need_list],
+                days=30,
+            )
+            # Persist to Redis + DB
+            for st in need_list:
+                qty = int(bulk_sales.get(st.id, 0))
+                sales_out.setdefault(num, {})[st.id] = qty
+                redis_client.set(f"monthly_sales:{num}:{st.id}", qty, ex=3600)
+                MonthlySales.objects.update_or_create(
+                    product=product,
+                    store=st,
+                    defaults={"quantity_sold": qty, "days_calculated": 30},
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[MONTHLY BULK] failed for product %s: %s", num, exc, exc_info=True)
+            # Fall back to stale DB values when present
+            try:
+                stale = MonthlySales.objects.filter(product=product, store_id__in=[s.id for s in need_list])
+                for ms in stale:
+                    sales_out.setdefault(num, {})[int(ms.store_id)] = int(ms.quantity_sold)
+            except Exception:
+                pass
+
+    # Build payload + ETag
+    payload = {"sales": sales_out, "missing": missing}
+    payload_str = _json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    etag = 'W/"' + _hashlib.md5(payload_str.encode("utf-8")).hexdigest() + '"'
+
+    inm = request.META.get("HTTP_IF_NONE_MATCH")
+    if not force_refresh and inm and inm.strip() == etag:
+        resp = HttpResponseNotModified()
+        resp["ETag"] = etag
+        resp["Cache-Control"] = "private, max-age=60, stale-while-revalidate=120"
+        return resp
+
+    resp = JsonResponse(payload)
+    resp["ETag"] = etag
+    resp["Cache-Control"] = "no-store" if force_refresh else "private, max-age=60, stale-while-revalidate=120"
     return resp
 
 
