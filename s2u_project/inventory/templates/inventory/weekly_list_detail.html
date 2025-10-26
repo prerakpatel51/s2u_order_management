@@ -76,6 +76,8 @@
         border-left: 1px solid #cbd5e1;
         border-right: 1px solid #cbd5e1;
     }
+    /* Cached badge styling */
+    .cached-badge { font-size: .65rem; vertical-align: middle; margin-left: .25rem; transition: opacity .4s ease; }
     /* Supplier initials chip */
     .sup-badge{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:#eef2ff;color:#1d4ed8;font-weight:700;text-transform:uppercase;font-size:.75rem}
     /* Center supplier header and cell content */
@@ -488,7 +490,8 @@
         const rows = filtered.map((item) => {
             const systemStock = formatQuantity(item.system_stock);
             const monthlySales = item.monthly_sales || 0;
-            const monthlySalesDisplay = monthlySales > 0 ? `<div class="small text-primary fw-semibold">${monthlySales}/mo</div>` : '';
+            const cachedMark = item._monthly_cached ? ' <span class="badge bg-warning-subtle text-warning cached-badge">cached</span>' : '';
+            const monthlySalesDisplay = monthlySales > 0 ? `<div class="small text-primary fw-semibold">${monthlySales}/mo${cachedMark}</div>` : '';
 
             const otherStoreCells = otherStores.map((st, idx) => {
                 const stockVal = (item.other_stocks && (st.id in item.other_stocks)) ? formatQuantity(item.other_stocks[st.id]) : '—';
@@ -559,6 +562,12 @@
         }).join('');
 
         tableBody.innerHTML = rows;
+        // Clear one-time cached markers after showing them briefly
+        const badges = tableBody.querySelectorAll('.cached-badge');
+        if (badges.length) {
+            setTimeout(() => badges.forEach(el => el.remove()), 1600);
+            for (const [, it] of items) { if (it._monthly_cached) it._monthly_cached = false; }
+        }
         refreshTooltips();
     }
 
@@ -758,9 +767,46 @@
         }
     }
 
-    // Fetch monthly sales for a product (async, non-blocking)
+    // Client cache for monthly sales (localStorage)
+    const MONTHLY_TTL_MS = 30 * 60 * 1000; // 30 minutes
+    function msKey(productNumber) { return `ms:${productNumber}`; }
+    function readMonthlyFromCache(productNumber) {
+        try {
+            const raw = localStorage.getItem(msKey(productNumber));
+            if (!raw) return null;
+            const obj = JSON.parse(raw);
+            if (!obj || typeof obj.ts !== 'number' || !obj.salesByStore) return null;
+            if (Date.now() - obj.ts > MONTHLY_TTL_MS) return null;
+            return obj;
+        } catch (_) { return null; }
+    }
+    function writeMonthlyToCache(productNumber, salesByStore) {
+        try { localStorage.setItem(msKey(productNumber), JSON.stringify({ ts: Date.now(), salesByStore })); } catch (_) {}
+    }
+
+    // Fetch monthly sales for a product with client cache
     async function fetchMonthlySales(productNumber, forceRefresh = false) {
         try {
+            // Serve from client cache when fresh and not forced
+            if (!forceRefresh) {
+                const cached = readMonthlyFromCache(productNumber);
+                if (cached) {
+                    const item = items.get(Number(productNumber));
+                    if (item) {
+                        const byStore = cached.salesByStore || {};
+                        item.monthly_sales = byStore[storeId] || 0;
+                        item.other_monthly_sales = {};
+                        for (const st of otherStores) {
+                            if (byStore[st.id] != null) item.other_monthly_sales[st.id] = byStore[st.id];
+                        }
+                        item._monthly_cached = true;
+                        items.set(item.product_number, item);
+                        renderTable();
+                        return; // Cache hit
+                    }
+                }
+            }
+
             const url = new URL(`{% url 'inventory:monthly_sales_api' %}`, window.location.origin);
             url.searchParams.set('product', productNumber);
             if (forceRefresh) url.searchParams.set('force', '1');
@@ -776,27 +822,40 @@
             console.log(`Monthly sales data for product ${productNumber}:`, data);
 
             const item = items.get(Number(productNumber));
-            if (!item) {
-                console.warn(`Item ${productNumber} not found in items map`);
-                return;
-            }
+            if (!item) { console.warn(`Item ${productNumber} not found in items map`); return; }
 
             // Update monthly sales for current store and other stores
             item.monthly_sales = data.sales[storeId] || 0;
             item.other_monthly_sales = {};
             for (const st of otherStores) {
-                if (data.sales[st.id]) {
-                    item.other_monthly_sales[st.id] = data.sales[st.id];
-                }
+                if (data.sales[st.id] != null) item.other_monthly_sales[st.id] = data.sales[st.id];
             }
-
-            console.log(`Updated item ${productNumber} with monthly_sales=${item.monthly_sales}`);
             items.set(item.product_number, item);
+            // Store in client cache for fast reloads
+            writeMonthlyToCache(productNumber, data.sales || {});
             renderTable();
         } catch (error) {
             console.error(`Failed to fetch monthly sales for product ${productNumber}:`, error);
         }
     }
+
+    // Prefill monthly values from client cache before first render
+    (function prefillMonthlyFromCache() {
+        try {
+            for (const [, item] of items) {
+                const cached = readMonthlyFromCache(item.product_number);
+                if (!cached) continue;
+                const byStore = cached.salesByStore || {};
+                if (byStore[storeId] != null) item.monthly_sales = byStore[storeId];
+                item.other_monthly_sales = item.other_monthly_sales || {};
+                for (const st of otherStores) {
+                    if (byStore[st.id] != null) item.other_monthly_sales[st.id] = byStore[st.id];
+                }
+                item._monthly_cached = true;
+                items.set(item.product_number, item);
+            }
+        } catch (_) {}
+    })();
 
     async function addProduct(productNumber) {
         try {
@@ -1047,7 +1106,9 @@
                 }
                 item.other_stocks = { ...(item.other_stocks || {}), ...otherMap };
                 renderTable();
-                showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Stock refreshed for #${productNumber}.`);
+                // Also refresh monthly sales for this specific product
+                await fetchMonthlySales(productNumber, true);
+                showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Stock and monthly updated for #${productNumber}.`);
             } catch (e) {
                 showFeedback('danger', `<i class=\"bi bi-exclamation-octagon me-2\"></i>Refresh failed: ${e.message}`);
             }
@@ -1227,7 +1288,7 @@
                 let salesFailed = 0;
                 showFeedback('info', `<i class="bi bi-arrow-clockwise me-2"></i>[${currentStep}/${totalSteps}] Fetching monthly sales data...`);
 
-                // Process in batches of 5 to avoid overwhelming the server
+                // Process in batches with pacing to respect API rate limits
                 const batchSize = 5;
                 for (let i = 0; i < weeklyItems.length; i += batchSize) {
                     const batch = weeklyItems.slice(i, i + batchSize);
@@ -1242,9 +1303,9 @@
                     });
                     await Promise.all(promises);
 
-                    // Small delay between batches
+                    // Delay between batches (~5 req/s ~= 300/min)
                     if (i + batchSize < weeklyItems.length) {
-                        await new Promise(resolve => setTimeout(resolve, 200));
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     }
                 }
 
@@ -1314,16 +1375,16 @@
         const weeklyItems = Array.from(items.values());
         if (weeklyItems.length === 0) return;
 
-        // Process in batches of 3 to avoid overwhelming the server on page load
-        const batchSize = 3;
+        // Process in batches with pacing to respect API rate limits
+        const batchSize = 5;
         for (let i = 0; i < weeklyItems.length; i += batchSize) {
             const batch = weeklyItems.slice(i, i + batchSize);
             const promises = batch.map(item => fetchMonthlySales(item.product_number));
             await Promise.all(promises);
 
-            // Small delay between batches
+            // ~1s delay → ~5 req/s ≈ 300/min
             if (i + batchSize < weeklyItems.length) {
-                await new Promise(resolve => setTimeout(resolve, 300));
+                await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }
     })();

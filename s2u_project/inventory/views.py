@@ -12,7 +12,7 @@ import requests
 from django.core.management import call_command
 from django.db import OperationalError, transaction
 from django.db.models import Q, Prefetch, Count
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponseNotModified
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 from django.contrib.auth.decorators import login_required, user_passes_test
@@ -759,7 +759,7 @@ def refresh_all_status_api(request):
     return JsonResponse({"ok": True, **data})
 
 
-@ratelimit(key='user_or_ip', rate='30/m', method='GET', block=True)
+@ratelimit(key='user_or_ip', rate='300/m', method='GET', block=True)
 @login_required
 @require_GET
 def monthly_sales_api(request):
@@ -905,10 +905,29 @@ def monthly_sales_api(request):
                     pass
 
     logger.info(f"[MONTHLY SALES API] ✓ Response ready: {len(sales_data)} stores with data")
-    return JsonResponse({
-        "product": {"number": product.number, "name": product.name},
-        "sales": sales_data,
-    })
+
+    # Build payload and ETag for HTTP caching
+    import json as _json
+    import hashlib as _hashlib
+    payload = {"product": {"number": product.number, "name": product.name}, "sales": sales_data}
+    payload_str = _json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    etag = 'W/"' + _hashlib.md5(payload_str.encode("utf-8")).hexdigest() + '"'
+
+    # If client sent matching ETag and not force refresh, return 304
+    inm = request.META.get("HTTP_IF_NONE_MATCH")
+    if not force_refresh and inm and inm.strip() == etag:
+        resp = HttpResponseNotModified()
+        resp["ETag"] = etag
+        resp["Cache-Control"] = "private, max-age=60, stale-while-revalidate=120"
+        return resp
+
+    resp = JsonResponse(payload)
+    resp["ETag"] = etag
+    if force_refresh:
+        resp["Cache-Control"] = "no-store"
+    else:
+        resp["Cache-Control"] = "private, max-age=60, stale-while-revalidate=120"
+    return resp
 
 
 @login_required
@@ -1016,6 +1035,29 @@ def weekly_list_detail(request, list_id):
             ).values_list("product_id", "store_id", "actual")
             stock_map = {(pid, sid): float(actual) for pid, sid, actual in stocks}
 
+    # --- Server-side prefill of monthly sales to reduce initial flicker ---
+    current_sales_map: dict[int, int] = {}
+    other_sales_map: dict[tuple[int, int], int] = {}
+    try:
+        from .models import MonthlySales
+        from django.utils import timezone
+        from datetime import timedelta
+        product_ids = [item.product_id for item in items]
+        sales_qs = MonthlySales.objects.filter(product_id__in=product_ids)
+        target_store_ids = [order_list.store_id]
+        if is_admin:
+            target_store_ids += other_store_ids
+        sales_qs = sales_qs.filter(store_id__in=target_store_ids)
+        thirty_min_ago = timezone.now() - timedelta(minutes=30)
+        sales_qs = sales_qs.filter(calculated_at__gte=thirty_min_ago)
+        for s in sales_qs.only("product_id", "store_id", "quantity_sold", "calculated_at"):
+            if s.store_id == order_list.store_id:
+                current_sales_map[int(s.product_id)] = int(s.quantity_sold)
+            else:
+                other_sales_map[(int(s.product_id), int(s.store_id))] = int(s.quantity_sold)
+    except Exception as _exc:
+        logger.warning("[weekly_detail] Monthly prefill skipped: %s", _exc)
+
     # Serialize items for JavaScript
     items_data = [
         [
@@ -1037,8 +1079,11 @@ def weekly_list_detail(request, list_id):
                 "sqw": item.sqw,
                 "has_transfer": bool(item.transfer_from_id and item.transfer_bottles and item.transfer_bottles > 0),
                 "other_stocks": {sid: stock_map.get((item.product_id, sid), 0.0) for sid in other_store_ids} if is_admin else {},
-                "monthly_sales": 0,  # Will be loaded asynchronously
-                "other_monthly_sales": {},  # Will be loaded asynchronously
+                "monthly_sales": int(current_sales_map.get(item.product_id, 0)),
+                "other_monthly_sales": (
+                    {sid: other_sales_map.get((item.product_id, sid), 0) for sid in other_store_ids}
+                    if is_admin else {}
+                ),
             },
         ]
         for item in items
