@@ -18,10 +18,7 @@ cmds = [
   "/opt/venv/bin/python s2u_project/manage.py collectstatic --noinput"
 ]
 
-[phases.release]
-cmds = [
-  "/opt/venv/bin/python s2u_project/manage.py migrate --noinput"
-]
+; release handled in Procfile to avoid running during image build
 
 [start]
 # Don’t import <pkg>.wsgi directly; call Django’s loader instead.
