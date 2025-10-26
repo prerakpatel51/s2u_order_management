@@ -18,7 +18,7 @@ cmds = [
   "/opt/venv/bin/python s2u_project/manage.py collectstatic --noinput"
 ]
 
-; release handled in Procfile to avoid running during image build
+# Release is handled by Procfile (release) after image build
 
 [start]
 # Don’t import <pkg>.wsgi directly; call Django’s loader instead.
