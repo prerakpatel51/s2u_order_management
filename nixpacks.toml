@@ -15,12 +15,12 @@ cmds = [
 
 [phases.build]
 cmds = [
-  "python s2u_project/manage.py collectstatic --noinput && python s2u_project/manage.py migrate" 
+  "/opt/venv/bin/python s2u_project/manage.py collectstatic --noinput"
 ]
 
 [phases.release]
 cmds = [
-  "python s2u_project/manage.py migrate"
+  "/opt/venv/bin/python s2u_project/manage.py migrate --noinput"
 ]
 
 [start]
