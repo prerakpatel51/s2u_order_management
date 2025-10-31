@@ -21,3 +21,23 @@ The script will sequentially run:
 2. `load_products --skip-csv`
 3. `sync_stocks`
 4. `sync_all_monthly_sales --days 30`
+
+## Celery (Option B)
+
+If you prefer a resident worker with a scheduler instead of Railway Cron:
+
+1) Dependencies are already added (`celery`). Broker/result use `REDIS_URL`.
+
+2) Start commands for two Railway services:
+
+- celery-worker:
+  
+  bash -lc "/opt/venv/bin/celery -A s2u_project worker -l info --concurrency=${CELERY_CONCURRENCY:-2}"
+
+- celery-beat:
+  
+  bash -lc "/opt/venv/bin/celery -A s2u_project beat -l info"
+
+3) Ensure env vars exist on both services: `DJANGO_SETTINGS_MODULE`, `DATABASE_URL`, `REDIS_URL`, Korona creds.
+
+4) The schedule in `settings.py` runs `inventory.tasks.nightly_full_sync` at 04:00 UTC daily. Adjust by changing `CELERY_BEAT_SCHEDULE` or set `MONTHLY_DAYS` env var.

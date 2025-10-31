@@ -43,6 +43,9 @@ pytest==8.3.4
 pytest-django==4.9.0
 pytest-cov==6.0.0
 
+# Async tasks & scheduling (optional)
+celery==5.4.0
+
 # Security scanning (dev/ci only)
 bandit==1.8.0
 pip-audit==2.7.3

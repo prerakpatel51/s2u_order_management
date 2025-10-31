@@ -5,6 +5,7 @@ Consolidated settings that adapt based on DJANGO_ENV environment variable.
 
 from pathlib import Path
 import os
+from celery.schedules import crontab
 
 # Load .env file if it exists (for local development)
 from dotenv import load_dotenv
@@ -331,3 +332,23 @@ else:
     CSRF_TRUSTED_ORIGINS = [
         "https://cb816ee7f588.ngrok-free.app",
     ]
+
+# Celery (optional)
+# Uses Redis for broker and result backend by default.
+CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/1")
+CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/1")
+CELERY_TASK_ALWAYS_EAGER = False
+CELERY_TASK_TIME_LIMIT = 60 * 30  # 30 minutes
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_CONCURRENCY = int(os.environ.get("CELERY_CONCURRENCY", "2"))
+
+# If you run a Celery Beat service, this schedule will trigger the nightly chain.
+CELERY_ENABLE_UTC = True
+CELERY_TIMEZONE = "UTC"
+CELERY_BEAT_SCHEDULE = {
+    "nightly-full-sync": {
+        "task": "inventory.tasks.nightly_full_sync",
+        "schedule": crontab(minute=0, hour=4),  # 04:00 UTC
+        "kwargs": {"days": int(os.environ.get("MONTHLY_DAYS", "30"))},
+    }
+}
