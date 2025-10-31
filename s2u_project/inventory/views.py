@@ -285,6 +285,115 @@ def _search_products(query: str) -> Tuple[List[Product], List[Product]]:
     return results, suggestions
 
 
+def _search_products_paginated(query: str, page: int = 1, page_size: int = 10) -> Tuple[List[Product], bool]:
+    """Fast, paginated search for products.
+
+    Limits DB work up-front and only ranks a small candidate window to keep
+    latency low for typeahead UIs.
+
+    Args:
+        query: Raw user query.
+        page: 1-based page number.
+        page_size: Results per page (clamped 1..50).
+
+    Returns:
+        (matches, has_next)
+    """
+    page = max(1, int(page or 1))
+    page_size = max(1, min(50, int(page_size or 10)))
+
+    # Build filters exactly like the full search, but we'll apply a window
+    # and rank only within that window for performance.
+    filters = (
+        Q(name__icontains=query)
+        | Q(barcode__icontains=query)
+        | Q(supplier_name__icontains=query)
+    )
+
+    sanitized = re.sub(r"[^a-zA-Z0-9\s]", "", query)
+    if sanitized and sanitized != query:
+        pattern_chars = [re.escape(c) for c in sanitized.lower()]
+        regex_pattern = "[^a-zA-Z0-9]*".join(pattern_chars)
+        filters |= Q(name__iregex=regex_pattern) | Q(supplier_name__iregex=regex_pattern)
+
+    no_spaces = sanitized.replace(" ", "")
+    if no_spaces and no_spaces != sanitized and len(no_spaces) >= 3:
+        pattern_chars = [re.escape(c) for c in no_spaces.lower()]
+        regex_pattern = "[^a-zA-Z0-9]*".join(pattern_chars)
+        filters |= Q(name__iregex=regex_pattern)
+
+    # Token-level fuzzy
+    tokens = [t.strip() for t in re.split(r"[\s\-]+", query) if len(t.strip()) >= 2]
+    for token in tokens:
+        filters |= Q(name__icontains=token)
+        token_clean = re.sub(r"[^a-zA-Z0-9]", "", token)
+        if token_clean and len(token_clean) >= 2:
+            pattern_chars = [re.escape(c) for c in token_clean.lower()]
+            regex_pattern = "[^a-zA-Z0-9]*".join(pattern_chars)
+            filters |= Q(name__iregex=regex_pattern) | Q(supplier_name__iregex=regex_pattern)
+
+    exact_q = Q(barcode__iexact=query) | Q(barcodes__code__iexact=query)
+    if query.isdigit():
+        exact_q |= Q(number=int(query))
+    normalized_query = _normalize(query)
+
+    # Candidate window size: enough to rank a good page quickly without touching
+    # the whole table. Scale with page_size; cap at 600.
+    window = min(600, max(120, page_size * 12))
+
+    candidates = (
+        Product.objects.filter(filters | exact_q | Q(barcodes__code__icontains=query))
+        .distinct()
+        .only("number", "name", "barcode", "supplier_name")
+        .order_by("name")[:window]
+    )
+
+    ranked: List[Tuple[int, float, Product]] = []
+    for product in candidates:
+        priority = 0
+        normalized_name = _normalize(product.name)
+        lowers_name = product.name.lower()
+        query_lower = query.lower()
+
+        if product.barcode and product.barcode == query:
+            priority += 10
+        if query.isdigit() and product.number == int(query):
+            priority += 9
+        if normalized_name == normalized_query:
+            priority += 8
+        if normalized_name.startswith(normalized_query):
+            priority += 7
+        words = re.split(r'[\s\-]+', lowers_name)
+        for word in words:
+            if _normalize(word).startswith(normalized_query):
+                priority += 6
+                break
+        if lowers_name.startswith(query_lower):
+            priority += 5
+        if query_lower in lowers_name:
+            priority += 3
+        query_tokens = [_normalize(t) for t in re.split(r'\s+', query) if len(t) > 1]
+        if query_tokens:
+            matches = sum(1 for token in query_tokens if token in normalized_name)
+            if matches == len(query_tokens):
+                priority += 4
+            elif matches > 0:
+                priority += 2
+        if product.supplier_name and query_lower in product.supplier_name.lower():
+            priority += 1
+        ratio = SequenceMatcher(None, normalized_query, normalized_name).ratio()
+        ranked.append((priority, ratio, product))
+
+    ranked.sort(key=lambda item: (-item[0], -item[1], item[2].name))
+
+    # Page slice
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_items = [p for _, _, p in ranked[start:end]]
+    has_next = end < len(ranked)
+    return page_items, has_next
+
+
 @login_required
 def product_search(request):
     """Render the interactive product search page.
@@ -397,13 +506,25 @@ def home(request):
 @ratelimit(key='user_or_ip', rate='100/m', method='GET', block=True)
 @login_required
 def product_search_api(request):
-    """Search products API with rate limiting: 100 requests per minute per user."""
+    """Search products API (paginated) with rate limiting."""
     query = request.GET.get("q", "").strip()
     store_id = request.GET.get("store")
+    page = int((request.GET.get("page") or 1))
+    page_size = int((request.GET.get("page_size") or 10))
     if not query:
-        return JsonResponse({"matches": [], "suggestions": []})
+        return JsonResponse({"matches": [], "suggestions": [], "page": 1, "page_size": page_size, "has_next": False})
 
-    matches, suggestions = _search_products(query)
+    # Tiny Redis cache to accelerate repeated queries during typing
+    cache_key = f"search:v1:{_normalize(query)}:{page}:{min(max(page_size,1),50)}"
+    try:
+        cached = redis_get_json(cache_key)
+    except Exception:
+        cached = None
+    if cached:
+        return JsonResponse(cached)
+
+    matches, has_next = _search_products_paginated(query, page=page, page_size=page_size)
+    suggestions: List[Product] = []  # keep empty to avoid extra work
     store = None
     if store_id:
         try:
@@ -422,6 +543,9 @@ def product_search_api(request):
     payload = {
         "matches": [serialize(product) for product in matches],
         "suggestions": [serialize(product) for product in suggestions],
+        "page": page,
+        "page_size": page_size,
+        "has_next": has_next,
     }
     if store:
         payload["store"] = {
@@ -429,7 +553,10 @@ def product_search_api(request):
             "name": store.name,
             "number": store.number,
         }
-
+    try:
+        redis_set_json(cache_key, payload, ex=60)
+    except Exception:
+        pass
     return JsonResponse(payload)
 
 
@@ -858,41 +985,30 @@ def monthly_sales_api(request):
     sales_data = {}
     stores_needing_calculation = []
 
-    # Two-tier caching: Redis (fast) -> Database (persistent) -> API (slow)
+    # Two-tier caching: Redis -> DB. Only call API when force=1.
     if not force_refresh:
-        logger.info(f"[MONTHLY SALES API] Checking cache for {len(stores_with_korona)} stores...")
+        logger.info(f"[MONTHLY SALES API] Cache-only mode for {len(stores_with_korona)} stores")
         for store in stores_with_korona:
-            # Layer 1: Check Redis cache (fastest)
             redis_key = f"monthly_sales:{product.number}:{store.id}"
             cached_val = redis_client.get(redis_key)
             cached_qty = int(cached_val) if (cached_val is not None and str(cached_val).isdigit()) else None
-
             if cached_qty is not None:
-                logger.info(f"[MONTHLY SALES API] ✓ Redis HIT for product {product.number} at store {store.number}: {cached_qty}")
                 sales_data[store.id] = cached_qty
                 continue
-
-            # Layer 2: Check database cache
             try:
                 cached_sale = MonthlySales.objects.get(product=product, store=store)
-                # Check if stale (> 30 minutes)
-                if not cached_sale.is_stale:
-                    logger.info(f"[MONTHLY SALES API] ✓ DB HIT for product {product.number} at store {store.number}: {cached_sale.quantity_sold} (age: {cached_sale.calculated_at})")
-                    # Update Redis cache for next time (30 min TTL = 1800 seconds)
-                    redis_client.set(redis_key, int(cached_sale.quantity_sold), ex=3600)
-                    sales_data[store.id] = cached_sale.quantity_sold
-                else:
-                    logger.info(f"[MONTHLY SALES API] ✗ DB STALE for product {product.number} at store {store.number} (age: {cached_sale.calculated_at})")
-                    stores_needing_calculation.append(store)
+                sales_data[store.id] = int(cached_sale.quantity_sold)
+                # warm redis
+                redis_client.set(redis_key, int(cached_sale.quantity_sold), ex=3600)
             except MonthlySales.DoesNotExist:
-                logger.info(f"[MONTHLY SALES API] ✗ NO CACHE for product {product.number} at store {store.number}")
-                stores_needing_calculation.append(store)
+                # No compute here; leave as 0 to keep response snappy
+                sales_data[store.id] = 0
     else:
-        logger.info(f"[MONTHLY SALES API] Force refresh enabled - bypassing all cache")
+        logger.info(f"[MONTHLY SALES API] Force refresh enabled - calculating via Korona API")
         stores_needing_calculation = stores_with_korona
 
     # If we need to calculate for any stores, fetch receipts ONCE and process for all stores
-    if stores_needing_calculation:
+    if force_refresh and stores_needing_calculation:
         logger.info(f"[MONTHLY SALES API] Need to calculate for {len(stores_needing_calculation)} stores")
         try:
             # Fetch sales for ALL stores at once (much faster!)
@@ -1025,11 +1141,8 @@ def monthly_sales_bulk_api(request):
     from .redis_client import r as redis_client
     sales_out: dict[int, dict[int, int]] = {}
 
-    # First pass: try Redis and DB cache
+    # First pass: try Redis and DB cache (no API unless force=1)
     stores_needing: dict[int, list[Store]] = {}
-
-    from datetime import timedelta
-    fresh_cutoff = timezone.now() - timedelta(minutes=30)
 
     for num, product in products.items():
         if not product.korona_id:
@@ -1038,57 +1151,52 @@ def monthly_sales_bulk_api(request):
         sales_out[num] = {}
         if not force_refresh:
             for st in stores_with_korona:
-                # Redis
                 redis_key = f"monthly_sales:{num}:{st.id}"
                 cached_val = redis_client.get(redis_key)
                 if cached_val is not None and str(cached_val).isdigit():
                     sales_out[num][st.id] = int(cached_val)
                     continue
-                # DB cache
                 try:
-                    ms = MonthlySales.objects.only("quantity_sold", "calculated_at").get(product=product, store=st)
-                    if ms.calculated_at >= fresh_cutoff:
-                        sales_out[num][st.id] = int(ms.quantity_sold)
-                        redis_client.set(redis_key, int(ms.quantity_sold), ex=3600)
-                        continue
+                    ms = MonthlySales.objects.only("quantity_sold").get(product=product, store=st)
+                    sales_out[num][st.id] = int(ms.quantity_sold)
+                    redis_client.set(redis_key, int(ms.quantity_sold), ex=3600)
                 except MonthlySales.DoesNotExist:
-                    pass
-                # needs calc
-                stores_needing.setdefault(num, []).append(st)
+                    sales_out[num][st.id] = 0
         else:
             stores_needing[num] = stores_with_korona.copy()
 
     # Second pass: calculate missing/stale using Korona in a per-product bulk call
-    from .korona import calculate_monthly_sales_bulk
-    for num, need_list in stores_needing.items():
-        product = products.get(num)
-        if not product or not need_list:
-            continue
-        try:
-            bulk_sales = calculate_monthly_sales_bulk(
-                str(product.korona_id),
-                [(s.id, str(s.korona_id)) for s in need_list],
-                days=30,
-            )
-            # Persist to Redis + DB
-            for st in need_list:
-                qty = int(bulk_sales.get(st.id, 0))
-                sales_out.setdefault(num, {})[st.id] = qty
-                redis_client.set(f"monthly_sales:{num}:{st.id}", qty, ex=3600)
-                MonthlySales.objects.update_or_create(
-                    product=product,
-                    store=st,
-                    defaults={"quantity_sold": qty, "days_calculated": 30},
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.error("[MONTHLY BULK] failed for product %s: %s", num, exc, exc_info=True)
-            # Fall back to stale DB values when present
+    if force_refresh and stores_needing:
+        from .korona import calculate_monthly_sales_bulk
+        for num, need_list in stores_needing.items():
+            product = products.get(num)
+            if not product or not need_list:
+                continue
             try:
-                stale = MonthlySales.objects.filter(product=product, store_id__in=[s.id for s in need_list])
-                for ms in stale:
-                    sales_out.setdefault(num, {})[int(ms.store_id)] = int(ms.quantity_sold)
-            except Exception:
-                pass
+                bulk_sales = calculate_monthly_sales_bulk(
+                    str(product.korona_id),
+                    [(s.id, str(s.korona_id)) for s in need_list],
+                    days=30,
+                )
+                # Persist to Redis + DB
+                for st in need_list:
+                    qty = int(bulk_sales.get(st.id, 0))
+                    sales_out.setdefault(num, {})[st.id] = qty
+                    redis_client.set(f"monthly_sales:{num}:{st.id}", qty, ex=3600)
+                    MonthlySales.objects.update_or_create(
+                        product=product,
+                        store=st,
+                        defaults={"quantity_sold": qty, "days_calculated": 30},
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[MONTHLY BULK] failed for product %s: %s", num, exc, exc_info=True)
+                # Fall back to stale DB values when present
+                try:
+                    stale = MonthlySales.objects.filter(product=product, store_id__in=[s.id for s in need_list])
+                    for ms in stale:
+                        sales_out.setdefault(num, {})[int(ms.store_id)] = int(ms.quantity_sold)
+                except Exception:
+                    pass
 
     # Build payload + ETag
     payload = {"sales": sales_out, "missing": missing}

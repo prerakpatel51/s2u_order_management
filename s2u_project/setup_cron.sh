@@ -16,8 +16,11 @@ echo "========================================="
 echo "S2U Order Management - Cron Job Setup"
 echo "========================================="
 echo ""
-echo "This script will set up the following daily cron job:"
-echo "  • Sync stores and products - Daily at 4:00 AM"
+echo "This script will set up the following daily cron jobs:"
+echo "  • 04:00  Sync stores"
+echo "  • 04:15  Sync products"
+echo "  • 04:30  Sync stocks (all products)"
+echo "  • 05:00  Precompute monthly sales (all products)"
 echo ""
 echo "Project directory: $SCRIPT_DIR"
 echo "Python executable: $VENV_PYTHON"
@@ -101,8 +104,14 @@ cat > "$CRON_FILE" << EOF
 # S2U Order Management - Automatic Sync Jobs
 # Generated on $(date)
 
-# Daily 4:00 AM: Sync stores then products
-0 4 * * * $WRAPPER_SCRIPT sync_stores && $WRAPPER_SCRIPT load_products
+# Daily 04:00 AM: Sync stores
+0 4 * * * $WRAPPER_SCRIPT sync_stores
+# Daily 04:15 AM: Sync products
+15 4 * * * $WRAPPER_SCRIPT load_products --skip-csv
+# Daily 04:30 AM: Sync stocks for all products (may take time)
+30 4 * * * $WRAPPER_SCRIPT sync_stocks
+# Daily 05:00 AM: Precompute monthly sales cache for all products
+0 5 * * * $WRAPPER_SCRIPT sync_all_monthly_sales --days 30
 
 EOF
 

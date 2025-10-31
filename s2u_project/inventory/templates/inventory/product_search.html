@@ -127,8 +127,9 @@
     let debounceTimer = null;
     let lastQuery = input.value.trim();
     let suggestionsData = [];
+    let suggPage = 1, suggHasNext = false, suggQuery = '';
     let highlighted = -1;
-    const selectedProducts = new Map();
+    let selectedProducts = new Map();
     let tooltipInstances = [];
     let isProcessing = false;  // Prevent concurrent adds
 
@@ -153,6 +154,26 @@
         tooltipInstances = Array.from(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(
             (el) => new bootstrap.Tooltip(el)
         );
+    }
+
+    // Short beep feedback for barcode scans
+    function playBeep(ok = true) {
+        try {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            const ctx = new Ctx();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = ok ? 880 : 220; // high=success, low=error
+            osc.connect(gain); gain.connect(ctx.destination);
+            gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.01);
+            const dur = ok ? 0.08 : 0.18;
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+            osc.stop(ctx.currentTime + dur + 0.02);
+        } catch (_) {}
     }
 
     // Fetch monthly sales for a product (async, non-blocking)
@@ -268,19 +289,20 @@
         });
     }
 
-    function renderSuggestions(query, matches, suggestions) {
-        const combined = [...matches, ...suggestions];
-        suggestionsData = combined;
+    function renderSuggestions(query, matches, suggestions, append = false, hasNext = false) {
+        const combined = [...(matches || []), ...(suggestions || [])];
         highlighted = -1;
-        if (!query || combined.length === 0) {
+        if (!append) suggestionsData = [];
+        if (!query || (combined.length === 0 && !append)) {
             hideSuggestions();
             feedback.innerHTML = query
                 ? `<i class="bi bi-exclamation-triangle me-1"></i>No results found for “${query}”.`
                 : `<i class="bi bi-info-circle me-1"></i>Start typing or scan a barcode to see matching products.`;
             return;
         }
-
-        suggestionList.innerHTML = combined.map((product, index) => `
+        const start = suggestionsData.length;
+        suggestionsData.push(...combined);
+        suggestionList.innerHTML = suggestionsData.map((product, index) => `
             <button type="button" class="list-group-item list-group-item-action" data-index="${index}">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
@@ -299,11 +321,21 @@
                 </div>
             </button>
         `).join('');
+        // Load more
+        suggHasNext = !!hasNext;
+        if (suggHasNext) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'list-group-item list-group-item-action text-center fw-semibold';
+            btn.dataset.loadmore = '1';
+            btn.innerHTML = '<i class="bi bi-plus-circle me-1"></i>Load more';
+            suggestionList.appendChild(btn);
+        }
         suggestionBox.classList.remove('hidden');
-        feedback.innerHTML = `<i class="bi bi-list-ul me-1"></i>Showing ${combined.length} result${combined.length === 1 ? '' : 's'} for “${query}”. Use ↑ ↓ and Enter to add.`;
+        feedback.innerHTML = `<i class="bi bi-list-ul me-1"></i>Showing ${suggestionsData.length} result${suggestionsData.length === 1 ? '' : 's'} for “${query}”. Use ↑ ↓ and Enter to add.`;
     }
 
-    async function fetchSuggestions(query) {
+    async function fetchSuggestions(query, page = 1, append = false) {
         if (!query) {
             hideSuggestions();
             feedback.innerHTML = `<i class="bi bi-info-circle me-1"></i>Start typing or scan a barcode to see matching products.`;
@@ -311,8 +343,10 @@
         }
 
         lastQuery = query;
+        suggQuery = query;
+        suggPage = page;
         try {
-            const response = await fetch(`{% url 'inventory:product_search_api' %}?q=${encodeURIComponent(query)}`);
+            const response = await fetch(`{% url 'inventory:product_search_api' %}?q=${encodeURIComponent(query)}&page=${page}&page_size=10`);
             if (!response.ok) {
                 throw new Error('Network response was not ok');
             }
@@ -321,7 +355,7 @@
                 return;
             }
 
-            renderSuggestions(query, data.matches, data.suggestions);
+            renderSuggestions(query, data.matches, data.suggestions, append, !!data.has_next);
         } catch (error) {
             hideSuggestions();
             feedback.innerHTML = `<i class="bi bi-wifi-off me-1"></i>Unable to fetch suggestions right now. Please try again.`;
@@ -455,7 +489,7 @@
             return;
         }
 
-        selectedProducts.set(key, {
+        const newData = {
             ...product,
             stocks: stockEntries,
             // prefer barcodes from stock payload; fallback to suggestion payload
@@ -463,7 +497,8 @@
                 ? stockPayload.barcodes
                 : (Array.isArray(product.barcodes) ? product.barcodes : (product.barcode ? [product.barcode] : [])),
             monthly_sales: {},
-        });
+        };
+        selectedProducts = new Map([[key, newData], ...selectedProducts]);
 
         renderSelected();
         hideSuggestions();
@@ -487,6 +522,12 @@
 
     suggestionList.addEventListener('mousedown', async (event) => {
         event.preventDefault();
+        const more = event.target.closest('[data-loadmore="1"]');
+        if (more && suggHasNext) {
+            more.disabled = true;
+            await fetchSuggestions(suggQuery, suggPage + 1, true);
+            return;
+        }
         const item = event.target.closest('.list-group-item[data-index]');
         if (!item) return;
         const index = Number(item.dataset.index);
@@ -520,12 +561,14 @@
                 const raw = input.value.trim();
                 if (!raw) return;
                 try {
-                    const resp = await fetch(`{% url 'inventory:product_search_api' %}?q=${encodeURIComponent(raw)}`);
+                    const resp = await fetch(`{% url 'inventory:product_search_api' %}?q=${encodeURIComponent(raw)}&page=1&page_size=10`);
                     if (!resp.ok) throw new Error('Search failed');
                     const data = await resp.json();
                     const pool = [...(data.matches || []), ...(data.suggestions || [])];
+                    const isBarcode = /^\d{6,}$/.test(raw);
                     if (pool.length === 0) {
                         feedback.innerHTML = `<i class=\"bi bi-exclamation-triangle me-1\"></i>No results for “${raw}”.`;
+                        if (isBarcode) playBeep(false);
                         return;
                     }
                     const numeric = /^\d+$/.test(raw) ? Number(raw) : null;
@@ -533,10 +576,18 @@
                     if (!chosen && numeric !== null) {
                         chosen = pool.find(p => p.number === numeric) || null;
                     }
-                    if (!chosen) {
-                        chosen = pool[0];
+                    if (isBarcode) {
+                        if (chosen) {
+                            await addProduct(chosen);
+                            playBeep(true);
+                        } else {
+                            feedback.innerHTML = `<i class=\"bi bi-exclamation-triangle me-1\"></i>No exact barcode match for “${raw}”.`;
+                            playBeep(false);
+                        }
+                    } else {
+                        if (!chosen) chosen = pool[0];
+                        await addProduct(chosen);
                     }
-                    await addProduct(chosen);
                 } catch (e) {
                     feedback.innerHTML = `<i class=\"bi bi-exclamation-octagon text-danger me-1\"></i>${e.message || 'Unable to add product'}`;
                 }

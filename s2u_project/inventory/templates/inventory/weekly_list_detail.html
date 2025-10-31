@@ -427,7 +427,7 @@
     let lastQuery = '';
     let tooltipInstances = [];
 
-    const items = new Map(JSON.parse(document.getElementById('weekly-items-data').textContent));
+    let items = new Map(JSON.parse(document.getElementById('weekly-items-data').textContent));
     const suppliers = JSON.parse('{{ suppliers_json|escapejs }}');
 
     function escapeAttr(value) {
@@ -458,6 +458,26 @@
         tooltipInstances = Array.from(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(
             (el) => new bootstrap.Tooltip(el)
         );
+    }
+
+    // Beep feedback for barcode scans
+    function playBeep(ok = true) {
+        try {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            const ctx = new Ctx();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = ok ? 880 : 220;
+            osc.connect(gain); gain.connect(ctx.destination);
+            gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.01);
+            const dur = ok ? 0.08 : 0.18;
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+            osc.stop(ctx.currentTime + dur + 0.02);
+        } catch (_) {}
     }
 
     function renderTable() {
@@ -752,8 +772,10 @@
             if (!resp.ok) throw new Error('Search failed');
             const data = await resp.json();
             const pool = [...(data.matches || []), ...(data.suggestions || [])];
+            const isBarcode = /^\d{6,}$/.test(query);
             if (pool.length === 0) {
                 showFeedback('info', `<i class="bi bi-exclamation-triangle me-2"></i>No products found matching “${escapeAttr(query)}”.`);
+                if (isBarcode) playBeep(false);
                 return;
             }
             // Prefer exact barcode or number match when available
@@ -762,12 +784,16 @@
             if (!chosen && numeric !== null) {
                 chosen = pool.find(p => p.number === numeric) || null;
             }
-            if (!chosen) {
-                chosen = pool[0];
+            if (isBarcode && !chosen) {
+                showFeedback('info', `<i class=\"bi bi-exclamation-triangle me-2\"></i>No exact barcode match for “${escapeAttr(query)}”.`);
+                playBeep(false);
+                return;
             }
+            if (!chosen) chosen = pool[0];
             hideSuggestions();
             queryInput.value = '';
             await addProduct(chosen.number);
+            if (isBarcode) playBeep(true);
         } catch (e) {
             showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${e.message || 'Unable to add product'}`);
         }
@@ -877,7 +903,7 @@
                 throw new Error('Unable to add product');
             }
             const data = await response.json();
-            items.set(data.product_number, data);
+            items = new Map([[data.product_number, data], ...items]);
             renderTable();
             showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Added \"${data.product_name}\".`);
 
