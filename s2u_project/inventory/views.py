@@ -41,8 +41,8 @@ def _refresh_lock_key() -> str:
 
 # Staff check helper used by admin-only views
 def _staff_required(user):
-    """Return True if the user is authenticated and is staff."""
-    return bool(user and user.is_authenticated and user.is_staff)
+    """Return True for staff or superuser (admin)."""
+    return bool(user and user.is_authenticated and (user.is_staff or getattr(user, "is_superuser", False)))
 
 
 def _normalize(text: str) -> str:
@@ -508,7 +508,7 @@ def home(request):
             "selected_store": selected_store,
             "date_from": date_from_raw,
             "date_to": date_to_raw,
-            "can_refresh": bool(request.user.is_staff),
+            "can_refresh": bool(getattr(request.user, "is_staff", False) or getattr(request.user, "is_superuser", False)),
             "active_refresh_job": active_job,
         },
     )

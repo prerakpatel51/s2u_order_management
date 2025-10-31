@@ -33,8 +33,8 @@ def _last_completed_ts() -> timezone.datetime | None:
 
 @receiver(user_logged_in)
 def trigger_refresh_on_login(sender, user, request, **kwargs):  # noqa: ANN001
-    # Only staff can trigger the global refresh automatically
-    if not getattr(user, "is_staff", False):
+    # Allow staff or superuser (admin) to trigger
+    if not (getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)):
         return
 
     # Refresh interval (minutes); default 24h
@@ -55,4 +55,3 @@ def trigger_refresh_on_login(sender, user, request, **kwargs):  # noqa: ANN001
     if not last or (now - last) >= timedelta(minutes=interval_min):
         # Start in background; UI will auto-detect and show progress
         start_global_refresh_async(user.id)
-
