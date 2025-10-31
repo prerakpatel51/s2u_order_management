@@ -20,9 +20,11 @@
   .suggestion-box .list-group-item.active,
   .suggestion-box .list-group-item:focus,
   .suggestion-box .list-group-item:hover {
-    background-color:#fff;
-    border-color:#eef2f7;
+    background-color: rgba(229,73,46,.08); /* subtle orange wash for hover/active */
+    border-color: var(--brand-orange);
+    color: inherit;
     box-shadow: inset 3px 0 0 0 var(--brand-orange);
+    transition: background-color .12s ease, border-color .12s ease;
   }
 
   /* Results layout polish */
