@@ -488,6 +488,16 @@ def home(request):
     # Prefetch weekly lists for each (filtered) store
     store_qs = stores_all.prefetch_related(Prefetch("weekly_lists", queryset=wl_base))
 
+    # Detect active global refresh (for auto-polling)
+    active_job = ""
+    try:
+        if redis_exists(_refresh_lock_key()):
+            val = redis_client.get("refresh:current_job")
+            if val:
+                active_job = str(val)
+    except Exception:
+        pass
+
     return render(
         request,
         "inventory/home.html",
@@ -499,6 +509,7 @@ def home(request):
             "date_from": date_from_raw,
             "date_to": date_to_raw,
             "can_refresh": bool(request.user.is_staff),
+            "active_refresh_job": active_job,
         },
     )
 
@@ -847,13 +858,20 @@ def _update_progress(job_id: str, payload: Dict) -> None:
 
 
 def _run_refresh_job(job_id: str, user_id: int) -> None:
-    """Background worker to refresh stores and products only (lightweight)."""
+    """Background worker to refresh stores, products, stocks, and monthly sales."""
     try:
         # Acquire simple lock to avoid concurrent global refreshes
         # Acquire lock with NX
         redis_setnx(_refresh_lock_key(), job_id, ex=1800)
 
-        _update_progress(job_id, {"step": "init", "message": "Starting refresh...", "done": False})
+        # Mark last-started timestamp
+        try:
+            from django.utils import timezone as _tz
+            redis_set_json("refresh:last_started_at", {"ts": _tz.now().isoformat()})
+        except Exception:
+            pass
+
+        _update_progress(job_id, {"step": "init", "message": "Starting refresh...", "done": False, "progress": 0})
 
         # Step 1: Sync stores
         _update_progress(job_id, {"step": "stores", "message": "Syncing stores...", "progress": 5})
@@ -867,7 +885,17 @@ def _run_refresh_job(job_id: str, user_id: int) -> None:
         call_command("load_products", skip_csv=True)
         products_qs = Product.objects.exclude(korona_id__isnull=True)
         products_count = products_qs.count()
-        _update_progress(job_id, {"products": products_count, "progress": 90, "message": f"Products synced: {products_count}"})
+        _update_progress(job_id, {"products": products_count, "progress": 60, "message": f"Products synced: {products_count}"})
+
+        # Step 3: Sync stocks for all products
+        _update_progress(job_id, {"step": "stocks", "message": "Syncing stocks...", "progress": 75})
+        call_command("sync_stocks")
+        _update_progress(job_id, {"progress": 88, "message": "Stocks synced"})
+
+        # Step 4: Precompute monthly sales for all products
+        _update_progress(job_id, {"step": "monthly", "message": "Calculating monthly sales...", "progress": 92})
+        call_command("sync_all_monthly_sales", "--days", "30")
+        _update_progress(job_id, {"progress": 98, "message": "Monthly sales cached"})
 
         # Done
         _update_progress(job_id, {
@@ -876,6 +904,12 @@ def _run_refresh_job(job_id: str, user_id: int) -> None:
             "progress": 100,
             "done": True,
         })
+        # Mark last-completed timestamp
+        try:
+            from django.utils import timezone as _tz
+            redis_set_json("refresh:last_completed_at", {"ts": _tz.now().isoformat()})
+        except Exception:
+            pass
     except Exception as exc:  # pylint: disable=broad-except
         _update_progress(job_id, {
             "step": "error",
@@ -892,22 +926,37 @@ def _run_refresh_job(job_id: str, user_id: int) -> None:
             pass
 
 
+def start_global_refresh_async(user_id: int) -> Optional[str]:
+    """Start the global refresh in a background thread, returning the job id.
+
+    Returns None when a refresh is already running.
+    """
+    # Prevent parallel runs
+    try:
+        if redis_exists(_refresh_lock_key()):
+            return None
+    except Exception:
+        # If Redis not reachable, attempt anyway
+        pass
+
+    job_id = uuid.uuid4().hex
+    redis_set_json(_refresh_job_key(job_id), {"step": "queued", "message": "Queued...", "progress": 0, "done": False}, ex=3600)
+    try:
+        redis_client.set("refresh:current_job", job_id, ex=3600)
+    except Exception:
+        pass
+    t = threading.Thread(target=_run_refresh_job, args=(job_id, user_id), daemon=True)
+    t.start()
+    return job_id
+
+
 @login_required
 @user_passes_test(_staff_required)
 def refresh_all_start_api(request):
     """Start an async refresh job. Returns a job ID for polling."""
-    # Prevent parallel runs
-    if redis_exists(_refresh_lock_key()):
+    job_id = start_global_refresh_async(request.user.id)
+    if not job_id:
         return JsonResponse({"ok": False, "error": "A refresh is already running. Please wait."}, status=409)
-
-    job_id = uuid.uuid4().hex
-    # Seed job status
-    redis_set_json(_refresh_job_key(job_id), {"step": "queued", "message": "Queued...", "progress": 0, "done": False}, ex=3600)
-
-    # Spawn background thread
-    t = threading.Thread(target=_run_refresh_job, args=(job_id, request.user.id), daemon=True)
-    t.start()
-
     return JsonResponse({"ok": True, "job": job_id})
 
 

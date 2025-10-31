@@ -62,3 +62,9 @@ class InventoryConfig(AppConfig):
 
         t = threading.Thread(target=_worker, name="startup-sync", daemon=True)
         t.start()
+
+        # Import signal handlers (login-triggered refresh)
+        try:
+            from . import signals  # noqa: F401
+        except Exception:  # pragma: no cover
+            pass
