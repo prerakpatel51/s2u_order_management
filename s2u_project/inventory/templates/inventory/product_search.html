@@ -22,10 +22,14 @@
   .suggestion-box .list-group-item:hover {
     background-color: rgba(229,73,46,.08); /* subtle orange wash for hover/active */
     border-color: var(--brand-orange);
-    color: inherit;
+    color: var(--bs-body-color); /* keep text dark, avoid white on active */
     box-shadow: inset 3px 0 0 0 var(--brand-orange);
     transition: background-color .12s ease, border-color .12s ease;
   }
+
+  /* Ensure default text color on items (overrides Bootstrap active color) */
+  .suggestion-box .list-group-item { color: var(--bs-body-color); }
+  .suggestion-box .list-group-item .small { color: var(--bs-secondary-color); }
 
   /* Results layout polish */
   .results-card { border: none; border-radius: 12px; box-shadow: 0 16px 40px -28px rgba(0,0,0,.25); }
