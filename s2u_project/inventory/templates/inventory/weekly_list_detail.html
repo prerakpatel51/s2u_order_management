@@ -41,7 +41,11 @@
     }
     /* Sticky + layout polish */
     /* Narrower # and Supplier columns for better density */
-    #weekly-items-table{--w-num:70px;--w-name:240px;--w-barcode:140px;--w-supplier:96px;--w-action:84px}
+    #weekly-items-table{--w-num:60px;--w-name:240px;--w-barcode:140px;--w-supplier:84px;--w-action:84px}
+    /* Extra-tight on small screens */
+    @media (max-width: 768px) {
+        #weekly-items-table{--w-num:52px;--w-supplier:72px}
+    }
     /* Smaller font for product name */
     #weekly-items-table tbody td:nth-child(2) { font-size: 0.875rem; }
     /* Sticky header */

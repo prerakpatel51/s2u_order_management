@@ -1,4 +1,7 @@
 from django.contrib import admin
+from django.contrib.auth import get_user_model
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.core.exceptions import PermissionDenied
 
 from .models import Product, ProductStock, Store, WeeklyOrderItem, WeeklyOrderList, MonthlySales
 
@@ -62,3 +65,34 @@ class MonthlySalesAdmin(admin.ModelAdmin):
     list_filter = ("store", "calculated_at")
     search_fields = ("product__name", "product__number", "store__name", "store__number")
     readonly_fields = ("calculated_at",)
+
+
+# --- Restrict user deletion in Django admin: only superusers may delete users ---
+User = get_user_model()
+
+try:
+    admin.site.unregister(User)  # in case already registered
+except Exception:
+    pass
+
+
+@admin.register(User)
+class UserAdmin(BaseUserAdmin):
+    def has_delete_permission(self, request, obj=None):
+        return bool(request.user and request.user.is_superuser)
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not (request.user and request.user.is_superuser):
+            actions.pop('delete_selected', None)
+        return actions
+
+    def delete_model(self, request, obj):
+        if not self.has_delete_permission(request, obj):
+            raise PermissionDenied("Only superusers can delete users.")
+        return super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        if not self.has_delete_permission(request):
+            raise PermissionDenied("Only superusers can delete users.")
+        return super().delete_queryset(request, queryset)

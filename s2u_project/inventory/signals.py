@@ -3,6 +3,10 @@ from __future__ import annotations
 import os
 from datetime import timedelta
 from django.contrib.auth.signals import user_logged_in
+from django.contrib.auth import get_user_model
+from django.db.models.signals import pre_save
+from django.core.exceptions import ValidationError
+import re
 from django.dispatch import receiver
 from django.utils import timezone
 
@@ -55,3 +59,24 @@ def trigger_refresh_on_login(sender, user, request, **kwargs):  # noqa: ANN001
     if not last or (now - last) >= timedelta(minutes=interval_min):
         # Start in background; UI will auto-detect and show progress
         start_global_refresh_async(user.id)
+
+
+# Enforce username rules: case-insensitive + no spaces (single word)
+@receiver(pre_save, sender=get_user_model())
+def _enforce_username_rules(sender, instance, **kwargs):  # noqa: ANN001
+    username = getattr(instance, "username", "") or ""
+    norm = username.strip()
+    if not norm:
+        return
+    if re.search(r"\s", norm):
+        raise ValidationError("Username cannot contain spaces.")
+    norm_lower = norm.lower()
+    instance.username = norm_lower
+
+    # Case-insensitive uniqueness check
+    User = sender
+    qs = User._default_manager.filter(username__iexact=norm_lower)
+    if instance.pk:
+        qs = qs.exclude(pk=instance.pk)
+    if qs.exists():
+        raise ValidationError("A user with that username already exists (case-insensitive).")

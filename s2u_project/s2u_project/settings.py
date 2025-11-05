@@ -174,6 +174,11 @@ LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "inventory:home"
 LOGOUT_REDIRECT_URL = "inventory:home"
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Auth backend: case-insensitive usernames
+AUTHENTICATION_BACKENDS = [
+    "s2u_project.auth_backends.CaseInsensitiveModelBackend",
+]
 # Security settings (production only)
 if IS_PRODUCTION:
     SECURE_SSL_REDIRECT = True
