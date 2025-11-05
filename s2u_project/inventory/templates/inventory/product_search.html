@@ -390,73 +390,89 @@
         return payload;
     }
 
+    function getCsrfToken() {
+        const input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        if (input && input.value) return input.value;
+        const cookie = document.cookie.split('; ').find(row => row.startsWith('csrftoken='));
+        return cookie ? cookie.split('=')[1] : '';
+    }
+
+    async function startProductJob(productNumber) {
+        const res = await fetch(`{% url 'inventory:product_refresh_single_start' 0 %}`.replace('/0/', `/${productNumber}/`), {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCsrfToken() }
+        });
+        if (res.status === 409) return { queued: false, conflict: true };
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Failed to start job');
+        return { job: data.job };
+    }
+
+    async function pollProductJob(job) {
+        const url = new URL(`{% url 'inventory:product_refresh_single_status' %}`, window.location.origin);
+        url.searchParams.set('job', job);
+        const res = await fetch(url.toString());
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'status');
+        return data;
+    }
+
     async function refreshAllProductsStock() {
         if (selectedProducts.size === 0) {
             feedback.innerHTML = `<i class="bi bi-info-circle me-1"></i>No products to refresh. Add products first.`;
             return;
         }
 
-        const productCount = selectedProducts.size;
-        let refreshed = 0;
-        let failed = 0;
-        let salesRefreshed = 0;
-        let salesFailed = 0;
-
-        feedback.innerHTML = `<i class="bi bi-arrow-clockwise text-primary me-1"></i>Force refreshing ${productCount} product${productCount > 1 ? 's' : ''} from Korona API...`;
-
-        // Refresh all products concurrently (stock)
-        const refreshPromises = Array.from(selectedProducts.values()).map(async (product) => {
-            try {
-                const stockPayload = await fetchProductStock(product.number, true); // force=true
-
-                // Update the product data
-                selectedProducts.set(String(product.number), {
-                    ...product,
-                    stocks: stockPayload.stocks || [],
-                    barcodes: Array.isArray(stockPayload.barcodes) ? stockPayload.barcodes : (product.barcodes || (product.barcode ? [product.barcode] : [])),
-                });
-
-                refreshed++;
-                return { success: true, product: product.name };
-            } catch (error) {
-                failed++;
-                return { success: false, product: product.name, error: error.message };
-            }
-        });
-
-        await Promise.all(refreshPromises);
-
-        // Re-render the table
-        renderSelected();
-
-        // Refresh monthly sales in batches (async, in background)
-        feedback.innerHTML = `<i class="bi bi-arrow-clockwise text-primary me-1"></i>Refreshing monthly sales data...`;
-        const batchSize = 5;
         const productsArray = Array.from(selectedProducts.values());
-        for (let i = 0; i < productsArray.length; i += batchSize) {
-            const batch = productsArray.slice(i, i + batchSize);
-            const salesPromises = batch.map(async (product) => {
+        let started = 0, completed = 0, conflicts = 0;
+        feedback.innerHTML = `<i class="bi bi-arrow-clockwise text-primary me-1"></i>Queuing ${productsArray.length} product(s)…`;
+
+        const jobs = await Promise.all(productsArray.map(async (p) => {
+            try {
+                const { job, conflict } = await startProductJob(p.number);
+                if (conflict) { conflicts++; return null; }
+                started++; return { number: p.number, job };
+            } catch (e) { return null; }
+        }));
+
+        feedback.innerHTML = `<i class=\"bi bi-arrow-repeat me-1\"></i>Refreshing… 0/${productsArray.length} done`;
+
+        // Poll all jobs; on completion, pull cached stock+monthly and update table
+        await Promise.all(jobs.filter(Boolean).map(async (j) => {
+            const job = j.job; const num = j.number;
+            const poll = async () => {
                 try {
-                    await fetchMonthlySales(product.number, true); // force refresh
-                    salesRefreshed++;
-                } catch (error) {
-                    console.error(`Failed to refresh monthly sales for ${product.name}:`, error);
-                    salesFailed++;
+                    const s = await pollProductJob(job);
+                    if (s.done) {
+                        // Pull cached stock
+                        try {
+                            const stockResp = await fetch(`{% url 'inventory:product_stock_api' %}?product=${num}`);
+                            if (stockResp.ok) {
+                                const stock = await stockResp.json();
+                                const existing = selectedProducts.get(String(num));
+                                if (existing) {
+                                    existing.stocks = stock.stocks || [];
+                                    existing.barcodes = Array.isArray(stock.barcodes) ? stock.barcodes : (existing.barcodes || (existing.barcode ? [existing.barcode] : []));
+                                    selectedProducts.set(String(num), existing);
+                                }
+                            }
+                            await fetchMonthlySales(num, false);
+                        } catch (_) {}
+                        completed++;
+                        renderSelected();
+                        feedback.innerHTML = `<i class=\"bi bi-arrow-repeat me-1\"></i>Refreshing… ${completed}/${productsArray.length} done`;
+                    } else {
+                        setTimeout(poll, 900);
+                    }
+                } catch (err) {
+                    setTimeout(poll, 1200);
                 }
-            });
-            await Promise.all(salesPromises);
+            };
+            await poll();
+        }));
 
-            // Small delay between batches
-            if (i + batchSize < productsArray.length) {
-                await new Promise(resolve => setTimeout(resolve, 200));
-            }
-        }
-
-        if (failed === 0 && salesFailed === 0) {
-            feedback.innerHTML = `<i class="bi bi-check-circle text-success me-1"></i>Successfully refreshed ${refreshed} product${refreshed > 1 ? 's' : ''} and ${salesRefreshed} monthly sales records!`;
-        } else {
-            feedback.innerHTML = `<i class="bi bi-exclamation-triangle text-warning me-1"></i>Refreshed ${refreshed}/${productCount} products and ${salesRefreshed}/${productCount} sales. ${failed + salesFailed} failed.`;
-        }
+        const msg = conflicts > 0 ? ` (${conflicts} already running)` : '';
+        feedback.innerHTML = `<i class=\"bi bi-check-circle text-success me-1\"></i>Refresh complete for ${completed}/${productsArray.length}${msg}.`;
     }
 
     async function addProduct(product) {

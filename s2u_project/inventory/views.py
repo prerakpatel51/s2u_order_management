@@ -2927,3 +2927,142 @@ def weekly_item_refresh_status(request):
     if not data:
         return JsonResponse({"ok": False, "error": "Job not found"}, status=404)
     return JsonResponse({"ok": True, **data})
+
+
+# ===== Weekly List Full Refresh (async) =====
+
+def _weekly_refresh_job_key(job_id: str) -> str:
+    return f"weekly_refresh:{job_id}"
+
+def _weekly_refresh_lock_key(list_id: int) -> str:
+    return f"weekly_refresh:lock:{list_id}"
+
+def _update_weekly_job(job_id: str, payload: Dict) -> None:
+    key = _weekly_refresh_job_key(job_id)
+    current = redis_get_json(key, {}) or {}
+    current.update(payload)
+    redis_set_json(key, current, ex=3600)
+
+def _run_weekly_refresh_job(job_id: str, list_id: int) -> None:
+    from .models import WeeklyOrderList, Product, Store, MonthlySales
+    try:
+        _update_weekly_job(job_id, {"step": "init", "message": "Starting…", "progress": 0, "done": False})
+
+        # Step 1: Sync stores
+        _update_weekly_job(job_id, {"step": "stores", "message": "Syncing stores…", "progress": 10})
+        call_command("sync_stores")
+
+        # Step 2: Sync products
+        _update_weekly_job(job_id, {"step": "products", "message": "Syncing products…", "progress": 25})
+        call_command("load_products", skip_csv=True)
+
+        # Step 3: Per-item stock refresh (scoped)
+        _update_weekly_job(job_id, {"step": "stocks", "message": "Updating stock…", "progress": 40})
+        wl = WeeklyOrderList.objects.select_related("store").prefetch_related("items__product").get(pk=list_id)
+        product_numbers = [it.product.number for it in wl.items.all()]
+        total = len(product_numbers)
+        done = 0
+        for pn in product_numbers:
+            call_command("sync_stocks", "--product", str(pn))
+            done += 1
+            if done % 3 == 0 or done == total:
+                pct = 40 + int(30 * (done / max(1, total)))
+                _update_weekly_job(job_id, {"progress": pct, "message": f"Updating stock… {done}/{total}"})
+
+        # Step 4: Monthly sales for all items (bulk per product)
+        _update_weekly_job(job_id, {"step": "monthly", "message": "Calculating monthly sales…", "progress": 75})
+        active_stores = list(Store.objects.filter(active=True, korona_id__isnull=False))
+        pairs = [(s.id, str(s.korona_id)) for s in active_stores]
+        from .korona import calculate_monthly_sales_bulk
+        for idx, pn in enumerate(product_numbers, start=1):
+            try:
+                product = Product.objects.get(number=pn)
+            except Product.DoesNotExist:
+                continue
+            sales = calculate_monthly_sales_bulk(str(product.korona_id), pairs, days=30)
+            for s in active_stores:
+                qty = int(sales.get(s.id, 0))
+                MonthlySales.objects.update_or_create(
+                    product=product, store=s,
+                    defaults={"quantity_sold": qty, "days_calculated": 30},
+                )
+                try:
+                    redis_client.set(f"monthly_sales:{product.number}:{s.id}", qty, ex=3600)
+                except Exception:
+                    pass
+            if idx % 2 == 0 or idx == total:
+                pct = 75 + int(20 * (idx / max(1, total)))
+                _update_weekly_job(job_id, {"progress": pct, "message": f"Calculating monthly… {idx}/{total}"})
+
+        _update_weekly_job(job_id, {"step": "done", "message": "Weekly refresh complete.", "progress": 100, "done": True})
+    except Exception as exc:
+        _update_weekly_job(job_id, {"step": "error", "message": f"Failed: {exc}", "error": str(exc), "done": True})
+    finally:
+        try:
+            redis_delete(_weekly_refresh_lock_key(list_id))
+        except Exception:
+            pass
+
+
+@ratelimit(key='user_or_ip', rate='10/m', method='POST', block=True)
+@login_required
+def weekly_refresh_start(request, list_id: int):
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
+    # Prevent overlap per-list
+    try:
+        if not redis_setnx(_weekly_refresh_lock_key(list_id), request.user.id, ex=1800):
+            return JsonResponse({"ok": False, "error": "Refresh already running for this list."}, status=409)
+    except Exception:
+        pass
+    job_id = uuid.uuid4().hex
+    redis_set_json(_weekly_refresh_job_key(job_id), {"step": "queued", "progress": 0, "done": False, "list_id": list_id}, ex=3600)
+    t = threading.Thread(target=_run_weekly_refresh_job, args=(job_id, list_id), daemon=True)
+    t.start()
+    return JsonResponse({"ok": True, "job": job_id})
+
+
+@ratelimit(key='user_or_ip', rate='120/m', method='GET', block=True)
+@login_required
+@require_GET
+def weekly_refresh_status(request):
+    job_id = (request.GET.get("job") or "").strip()
+    if not job_id:
+        return JsonResponse({"ok": False, "error": "Missing job id"}, status=400)
+    data = redis_get_json(_weekly_refresh_job_key(job_id))
+    if not data:
+        return JsonResponse({"ok": False, "error": "Job not found"}, status=404)
+    return JsonResponse({"ok": True, **data})
+
+
+# ===== Inventory Lookup: Single Product Refresh (async) =====
+
+@ratelimit(key='user_or_ip', rate='60/m', method='POST', block=True)
+@login_required
+def product_refresh_single_start(request, product_number: int):
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
+    # Prevent overlapping refresh for the same product
+    try:
+        if not redis_setnx(_item_refresh_lock_key(product_number), request.user.id, ex=600):
+            return JsonResponse({"ok": False, "error": "Refresh already running for this product."}, status=409)
+    except Exception:
+        pass
+    job_id = uuid.uuid4().hex
+    redis_set_json(_item_refresh_job_key(job_id), {"step": "queued", "progress": 0, "done": False, "product": product_number}, ex=900)
+    t = threading.Thread(target=_run_item_refresh_job, args=(job_id, product_number, None), daemon=True)
+    t.start()
+    return JsonResponse({"ok": True, "job": job_id})
+
+
+@ratelimit(key='user_or_ip', rate='240/m', method='GET', block=True)
+@login_required
+@require_GET
+def product_refresh_single_status(request):
+    job_id = (request.GET.get("job") or "").strip()
+    if not job_id:
+        return JsonResponse({"ok": False, "error": "Missing job id"}, status=400)
+    data = redis_get_json(_item_refresh_job_key(job_id))
+    if not data:
+        return JsonResponse({"ok": False, "error": "Job not found"}, status=404)
+    return JsonResponse({"ok": True, **data})

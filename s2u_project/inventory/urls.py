@@ -36,6 +36,12 @@ urlpatterns = [
     # Per-item async refresh (stock + monthly)
     path("weekly/<int:list_id>/item/<int:product_number>/refresh/start/", views.weekly_item_refresh_start, name="weekly_item_refresh_start"),
     path("api/weekly/item/refresh/status/", views.weekly_item_refresh_status, name="weekly_item_refresh_status"),
+    # Generic single-product async refresh (for Inventory Lookup)
+    path("api/product/<int:product_number>/refresh/start/", views.product_refresh_single_start, name="product_refresh_single_start"),
+    path("api/product/refresh/status/", views.product_refresh_single_status, name="product_refresh_single_status"),
+    # Weekly-list full refresh start + status (async)
+    path("weekly/<int:list_id>/refresh/start/", views.weekly_refresh_start, name="weekly_refresh_start"),
+    path("api/weekly/refresh/status/", views.weekly_refresh_status, name="weekly_refresh_status"),
     # Admin user management
     path("admin/users/", views.user_manage, name="user_manage"),
 ]

@@ -204,7 +204,6 @@
                                 <button type="submit" class="btn btn-outline-secondary"><i class="bi bi-trash me-1"></i>Delete</button>
                             </form>
                             {% endif %}
-                            {% if is_admin %}
                             <div class="form-check form-switch ms-2">
                                 <input class="form-check-input" type="checkbox" id="toggle-hide-barcode">
                                 <label class="form-check-label small" for="toggle-hide-barcode">Hide # &amp; Barcode</label>
@@ -213,7 +212,6 @@
                                 <input class="form-check-input" type="checkbox" id="toggle-hide-others">
                                 <label class="form-check-label small" for="toggle-hide-others">Hide Other Stores</label>
                             </div>
-                            {% endif %}
                         </div>
                     </div>
 
@@ -600,8 +598,14 @@
     // Hide barcode column toggle (persists in localStorage)
     const BARCODE_KEY = 'weekly.hideBarcode';
     function applyBarcodePreference() {
-        const pref = localStorage.getItem(BARCODE_KEY) === '1';
-        hideBarcodeToggle.checked = pref;
+        let prefRaw = localStorage.getItem(BARCODE_KEY);
+        if (prefRaw === null) {
+            // Default: hide on small devices (phones)
+            prefRaw = (window.innerWidth < 768) ? '1' : '0';
+            try { localStorage.setItem(BARCODE_KEY, prefRaw); } catch (_) {}
+        }
+        const pref = prefRaw === '1';
+        if (hideBarcodeToggle) hideBarcodeToggle.checked = pref;
         const table = document.getElementById('weekly-items-table');
         table.classList.toggle('barcode-hidden', pref);
     }
@@ -617,8 +621,9 @@
     function applyOtherStocksPreference() {
         let pref = localStorage.getItem(OTHERS_KEY);
         if (pref === null) {
-            pref = (window.innerWidth < 1200) ? '1' : '0';
-            localStorage.setItem(OTHERS_KEY, pref);
+            // Default: hide on phones
+            pref = (window.innerWidth < 768) ? '1' : '0';
+            try { localStorage.setItem(OTHERS_KEY, pref); } catch (_) {}
         }
         const hide = pref === '1';
         if (hideOthersToggle) hideOthersToggle.checked = hide;
@@ -1387,13 +1392,95 @@
         });
     }
 
+    // Replace top Refresh button handler with async server job to avoid blocking UI
+    if (refreshAllButton) {
+        const oldBtn = refreshAllButton;
+        const newBtn = oldBtn.cloneNode(true);
+        oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+        const refreshAllSpinner2 = newBtn.querySelector('.spinner-border');
+        newBtn.addEventListener('click', async (event) => {
+            event.preventDefault(); event.stopImmediatePropagation();
+            const weeklyItems = Array.from(items.values());
+            if (!weeklyItems || weeklyItems.length === 0) {
+                showFeedback('info', '<i class="bi bi-info-circle me-2"></i>No products to refresh. Add products first.');
+                return;
+            }
+            newBtn.disabled = true;
+            if (refreshAllSpinner2) refreshAllSpinner2.classList.remove('d-none');
+            try {
+                const startUrl = `{% url 'inventory:weekly_refresh_start' order_list.id %}`;
+                const res = await fetch(startUrl, { method: 'POST', headers: { 'X-CSRFToken': getCsrfToken() } });
+                if (res.status === 409) {
+                    showFeedback('warning', '<i class="bi bi-exclamation-triangle me-2"></i>Refresh already running for this list.');
+                    newBtn.disabled = false;
+                    if (refreshAllSpinner2) refreshAllSpinner2.classList.add('d-none');
+                    return;
+                }
+                const data = await res.json();
+                if (!data.ok) throw new Error(data.error || 'Failed to start refresh');
+                const job = data.job;
+                const poll = async () => {
+                    try {
+                        const url = new URL(`{% url 'inventory:weekly_refresh_status' %}`, window.location.origin);
+                        url.searchParams.set('job', job);
+                        const r = await fetch(url.toString());
+                        const s = await r.json();
+                        if (!s.ok) throw new Error(s.error || 'status error');
+                        if (s.done) {
+                            // Pull cached values per item to update UI
+                            for (const it of weeklyItems) {
+                                try {
+                                    const stockUrl = new URL(`{% url 'inventory:product_stock_api' %}`, window.location.origin);
+                                    stockUrl.searchParams.set('product', String(it.product_number));
+                                    const stockRes = await fetch(stockUrl);
+                                    if (stockRes.ok) {
+                                        const stock = await stockRes.json();
+                                        const cur = (stock.stocks || []).find(st => st.store && st.store.id === {{ order_list.store.id }});
+                                        if (cur) {
+                                            it.system_stock = Number(cur.stock?.actual || 0);
+                                            await fetch(`{% url 'inventory:weekly_update_item' order_list.id 0 %}`.replace('/0/', `/${it.id}/`), { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() }, body: JSON.stringify({ system_stock: it.system_stock }) });
+                                        }
+                                        const otherMap = {};
+                                        for (const se of (stock.stocks || [])) {
+                                            const sid = se.store?.id;
+                                            if (!sid || sid === {{ order_list.store.id }}) continue;
+                                            otherMap[sid] = Number(se.stock?.actual || 0);
+                                        }
+                                        it.other_stocks = { ...(it.other_stocks || {}), ...otherMap };
+                                        items.set(it.product_number, it);
+                                    }
+                                    await fetchMonthlySales(it.product_number, false);
+                                } catch (e) { console.warn('Post-refresh update failed', e); }
+                            }
+                            renderTable();
+                            showFeedback(s.step === 'error' ? 'danger' : 'success', s.step === 'error' ? `<i class=\"bi bi-exclamation-octagon me-2\"></i>${s.message}` : '<i class=\"bi bi-check-circle me-2\"></i>Weekly refresh complete.');
+                            newBtn.disabled = false;
+                            if (refreshAllSpinner2) refreshAllSpinner2.classList.add('d-none');
+                        } else {
+                            showFeedback('info', `<i class=\"bi bi-arrow-repeat me-2\"></i>${s.message || 'Working…'} (${Math.max(0, Math.min(100, s.progress||0))}%)`);
+                            setTimeout(poll, 900);
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        setTimeout(poll, 1200);
+                    }
+                };
+                poll();
+            } catch (error) {
+                showFeedback('danger', `<i class=\"bi bi-exclamation-octagon me-2\"></i>${error.message}`);
+                if (refreshAllSpinner2) refreshAllSpinner2.classList.add('d-none');
+                newBtn.disabled = false;
+            }
+        });
+    }
+
     if (refreshButton) {
         refreshButton.addEventListener('click', async () => {
             refreshButton.disabled = true;
             if (refreshSpinner) refreshSpinner.classList.remove('d-none');
-            showFeedback('info', '<i class="bi bi-arrow-clockwise me-2"></i>Refreshing products from Korona...');
+            showFeedback('info', '<i class="bi bi-arrow-clockwise me-2"></i>Queuing product refresh in background...');
             try {
-                const response = await fetch(`{% url 'inventory:product_refresh_api' %}`);
+                const response = await fetch(`{% url 'inventory:product_refresh_api' %}?async=1`);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
                 }
@@ -1401,7 +1488,7 @@
                 if (!data.ok) {
                     throw new Error(data.error || 'Unknown error');
                 }
-                showFeedback('success', `<i class="bi bi-check-circle me-2"></i>Products refreshed. Total products: ${data.total.toLocaleString()}.`);
+                showFeedback('success', `<i class="bi bi-check-circle me-2"></i>${data.queued ? 'Refresh queued.' : 'Products refreshed.'} Total products: ${data.total?.toLocaleString?.() || ''}`);
             } catch (error) {
                 showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>Failed to refresh products: ${error.message}`);
             } finally {
