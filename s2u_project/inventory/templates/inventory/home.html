@@ -146,9 +146,7 @@
                                         <a class="btn btn-sm btn-outline-success" target="_blank" href="{% url 'inventory:weekly_export_excel' wl.id %}">
                                             <i class="bi bi-file-earmark-excel me-1"></i>Excel
                                         </a>
-                                        <a class="btn btn-sm btn-outline-danger" target="_blank" href="{% url 'inventory:weekly_export_pdf' wl.id %}">
-                                            <i class="bi bi-file-earmark-pdf me-1"></i>PDF
-                                        </a>
+                                        {# PDF export removed from home page per request #}
                                     </div>
                                     {% if request.user.is_authenticated and request.user.is_staff %}
                                         {% if wl.finalized_at %}

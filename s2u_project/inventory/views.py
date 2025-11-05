@@ -1868,7 +1868,7 @@ def weekly_export_excel(request, list_id):
     title_text = f"Weekly Order List - {order_list.store.name} (#{order_list.store.number})"
     subtitle_text = f"Week of {order_list.target_date} • Generated on {dj_tz.now().astimezone().strftime('%Y-%m-%d %H:%M')} by {user_name}"
 
-    max_cols = 12
+    max_cols = len(headers)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_cols)
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max_cols)
     ws.cell(row=1, column=1, value=title_text).font = Font(bold=True, size=14)
@@ -1882,7 +1882,6 @@ def weekly_export_excel(request, list_id):
         "Supplier",
         "System Stock",
         "On Shelf",
-        "Weekly Needed",
         "Transfer From",
         "Transfer Bottles",
         "Joe",
@@ -1918,7 +1917,6 @@ def weekly_export_excel(request, list_id):
             item.product.supplier_name or "",
             float(item.system_stock),
             item.on_shelf,
-            item.monthly_needed,
             (item.transfer_from.number if item.transfer_from else ""),
             item.transfer_bottles,
             item.joe,
@@ -1934,14 +1932,14 @@ def weekly_export_excel(request, list_id):
             cell = ws.cell(row=r, column=c)
             cell.border = border
             # Alignment and number formats
-            if c in (1, 5, 6, 7, 9, 10, 11, 12):
+            if c in (1, 5, 6, 8, 9, 10, 11):
                 cell.alignment = Alignment(horizontal="center")
             if c == 5:
                 cell.number_format = "0.00"
 
     # Auto-adjust column widths with caps
     from openpyxl.utils import get_column_letter
-    widths = {1: 11, 2: 28, 3: 14, 4: 22, 5: 12, 6: 11, 7: 13, 8: 12, 9: 15, 10: 8, 11: 8, 12: 8}
+    widths = {1: 11, 2: 28, 3: 14, 4: 22, 5: 12, 6: 11, 7: 12, 8: 15, 9: 8, 10: 8, 11: 8}
     for col_idx in range(1, len(headers) + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 14)
 
@@ -2025,7 +2023,6 @@ def weekly_export_excel_custom(request, list_id):
         "supplier": "Supplier",
         "system_stock": "System Stock",
         "on_shelf": "On Shelf",
-        "monthly_needed": "Monthly Needed",
         "transfer_from": "Transfer From",
         "transfer_bottles": "Transfer Bottles",
         "joe": "Joe",
@@ -2097,8 +2094,7 @@ def weekly_export_excel_custom(request, list_id):
                 row.append(float(it.system_stock))
             elif key == "on_shelf":
                 row.append(it.on_shelf)
-            elif key == "monthly_needed":
-                row.append(it.monthly_needed)
+            
             elif key == "transfer_from":
                 row.append(it.transfer_from.number if it.transfer_from else "")
             elif key == "transfer_bottles":
@@ -2200,7 +2196,6 @@ def weekly_export_pdf(request, list_id):
         "Supplier",
         "System Stock",
         "On Shelf",
-        "Weekly Needed",
         "Transfer From",
         "Transfer Bottles",
         "Joe",
@@ -2229,7 +2224,6 @@ def weekly_export_pdf(request, list_id):
                 P(item.product.supplier_name or "—"),
                 P(f"{float(item.system_stock):.2f}"),
                 P(item.on_shelf),
-                P(item.monthly_needed),
                 P(item.transfer_from.number if item.transfer_from else "—"),
                 P(item.transfer_bottles),
                 P(item.joe),
@@ -2239,7 +2233,7 @@ def weekly_export_pdf(request, list_id):
         )
 
     # Build dynamic column widths that fit within page width
-    base_widths = [0.9, 2.8, 1.4, 2.6, 1.0, 0.9, 1.1, 1.1, 1.1, 0.8, 0.8, 0.8]  # inches
+    base_widths = [0.9, 2.8, 1.4, 2.6, 1.0, 0.9, 1.1, 1.1, 0.8, 0.8, 0.8]  # inches
     col_widths = [w * inch for w in base_widths[: len(headers)]]
     table = Table([headers] + table_rows, colWidths=col_widths, repeatRows=1)
 
@@ -2257,8 +2251,8 @@ def weekly_export_pdf(request, list_id):
                 ("FONTSIZE", (0, 1), (-1, -1), 8.5),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F3F4F6")]),
                 ("ALIGN", (0, 1), (0, -1), "CENTER"),  # Product #
-                ("ALIGN", (4, 1), (6, -1), "CENTER"),  # numeric stocks
-                ("ALIGN", (7, 1), (-1, -1), "CENTER"),  # admin numeric
+                ("ALIGN", (4, 1), (5, -1), "CENTER"),  # numeric near stock
+                ("ALIGN", (6, 1), (-1, -1), "CENTER"),  # admin numeric
             ]
         )
     )
@@ -2352,7 +2346,6 @@ def weekly_export_pdf_custom(request, list_id):
         "supplier": "Supplier",
         "system_stock": "System Stock",
         "on_shelf": "On Shelf",
-        "monthly_needed": "Monthly Needed",
         "transfer_from": "Transfer From",
         "transfer_bottles": "Transfer Bottles",
         "joe": "Joe",
@@ -2399,8 +2392,7 @@ def weekly_export_pdf_custom(request, list_id):
                 row.append(P(f"{float(it.system_stock):.2f}"))
             elif key == "on_shelf":
                 row.append(P(it.on_shelf))
-            elif key == "weekly_needed":
-                row.append(P(it.weekly_needed))
+            
             elif key == "transfer_from":
                 row.append(P(it.transfer_from.number if it.transfer_from else "—"))
             elif key == "transfer_bottles":
@@ -2424,7 +2416,6 @@ def weekly_export_pdf_custom(request, list_id):
         "Supplier": 2.6,
         "System Stock": 1.0,
         "On Shelf": 1.0,
-        "Weekly Needed": 1.1,
         "Transfer From": 1.1,
         "Transfer Bottles": 1.2,
         "Joe": 0.9,

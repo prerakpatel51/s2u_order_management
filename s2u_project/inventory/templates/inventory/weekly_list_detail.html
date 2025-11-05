@@ -40,7 +40,8 @@
         vertical-align: middle;
     }
     /* Sticky + layout polish */
-    #weekly-items-table{--w-num:84px;--w-name:240px;--w-barcode:140px;--w-supplier:120px;--w-action:84px}
+    /* Narrower # and Supplier columns for better density */
+    #weekly-items-table{--w-num:70px;--w-name:240px;--w-barcode:140px;--w-supplier:96px;--w-action:84px}
     /* Smaller font for product name */
     #weekly-items-table tbody td:nth-child(2) { font-size: 0.875rem; }
     /* Sticky header */
@@ -286,7 +287,6 @@
                                         <div class="col-6 col-md-4">
                                             <div class="form-check"><input class="form-check-input exp-col" id="c-sys" type="checkbox" data-key="system_stock" checked><label class="form-check-label" for="c-sys">System Stock</label></div>
                                             <div class="form-check"><input class="form-check-input exp-col" id="c-on" type="checkbox" data-key="on_shelf" checked><label class="form-check-label" for="c-on">On Shelf</label></div>
-                                            <div class="form-check"><input class="form-check-input exp-col" id="c-needed" type="checkbox" data-key="monthly_needed" checked><label class="form-check-label" for="c-needed">Monthly Needed</label></div>
                                         </div>
                                         <div class="col-12 col-md-4">
                                             <div class="form-check"><input class="form-check-input exp-col" id="c-tfrom" type="checkbox" data-key="transfer_from"><label class="form-check-label" for="c-tfrom">Transfer From</label></div>
