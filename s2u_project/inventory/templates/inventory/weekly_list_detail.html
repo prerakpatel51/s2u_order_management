@@ -1106,43 +1106,73 @@
         if (!row) return;
         const productNumber = Number(row.querySelector('th').textContent.trim());
         if (event.target.closest('.refresh-item')) {
+            // Kick off async background refresh for this product; keep UI responsive
+            const btn = event.target.closest('button');
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>';
             try {
-                // Fetch stock across ALL stores for this product and update current + other columns
-                const url = new URL(`{% url 'inventory:product_stock_api' %}`, window.location.origin);
-                url.searchParams.set('product', String(productNumber));
-                url.searchParams.set('force', '1');
-                const res = await fetch(url.toString());
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const startUrl = `{% url 'inventory:weekly_item_refresh_start' order_list.id 0 %}`.replace('/0/', `/${productNumber}/`);
+                const res = await fetch(startUrl, { method: 'POST', headers: { 'X-CSRFToken': getCsrfToken() } });
+                if (res.status === 409) {
+                    showFeedback('warning', `<i class=\"bi bi-exclamation-triangle me-2\"></i>Refresh already running for #${productNumber}.`);
+                    btn.disabled = false; btn.innerHTML = original; return;
+                }
                 const data = await res.json();
-                const item = items.get(productNumber);
-                if (!item) return;
-                const stocks = data.stocks || [];
-                // Update current store
-                const cur = stocks.find(s => s.store && s.store.id === {{ order_list.store.id }});
-                if (cur) {
-                    const newStock = Number(cur.stock?.actual || 0);
-                    item.system_stock = newStock;
-                    // Persist to DB so value remains on reload
-                    await fetch(`{% url 'inventory:weekly_update_item' order_list.id 0 %}`.replace('/0/', `/${item.id}/`), {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
-                        body: JSON.stringify({ system_stock: newStock })
-                    });
-                }
-                // Update other stores columns
-                const otherMap = {};
-                for (const s of stocks) {
-                    const sid = s.store?.id;
-                    if (!sid || sid === {{ order_list.store.id }}) continue;
-                    otherMap[sid] = Number(s.stock?.actual || 0);
-                }
-                item.other_stocks = { ...(item.other_stocks || {}), ...otherMap };
-                renderTable();
-                // Also refresh monthly sales for this specific product
-                await fetchMonthlySales(productNumber, true);
-                showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Stock and monthly updated for #${productNumber}.`);
+                if (!data.ok) throw new Error(data.error || 'Failed to start');
+                const job = data.job;
+                // Poll status; when done, pull fresh row data (cached APIs) and re-render
+                const poll = async () => {
+                    try {
+                        const u = new URL(`{% url 'inventory:weekly_item_refresh_status' %}`, window.location.origin);
+                        u.searchParams.set('job', job);
+                        const r = await fetch(u);
+                        const s = await r.json();
+                        if (!s.ok) throw new Error(s.error || 'status error');
+                        if (s.done) {
+                            // Fetch latest stock (no force) and monthly (no force)
+                            const stockUrl = new URL(`{% url 'inventory:product_stock_api' %}`, window.location.origin);
+                            stockUrl.searchParams.set('product', String(productNumber));
+                            const stockRes = await fetch(stockUrl);
+                            if (stockRes.ok) {
+                                const stock = await stockRes.json();
+                                const it = items.get(productNumber);
+                                if (it) {
+                                    const cur = (stock.stocks || []).find(s => s.store && s.store.id === {{ order_list.store.id }});
+                                    if (cur) {
+                                        it.system_stock = Number(cur.stock?.actual || 0);
+                                        await fetch(`{% url 'inventory:weekly_update_item' order_list.id 0 %}`.replace('/0/', `/${it.id}/`), {
+                                            method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+                                            body: JSON.stringify({ system_stock: it.system_stock })
+                                        });
+                                    }
+                                    // Update other stores display
+                                    const otherMap = {};
+                                    for (const s of (stock.stocks || [])) {
+                                        const sid = s.store?.id;
+                                        if (!sid || sid === {{ order_list.store.id }}) continue;
+                                        otherMap[sid] = Number(s.stock?.actual || 0);
+                                    }
+                                    it.other_stocks = { ...(it.other_stocks || {}), ...otherMap };
+                                    items.set(it.product_number, it);
+                                }
+                            }
+                            await fetchMonthlySales(productNumber, false);
+                            renderTable();
+                            showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Updated #${productNumber}.`);
+                            btn.disabled = false; btn.innerHTML = original;
+                        } else {
+                            setTimeout(poll, 800);
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        setTimeout(poll, 1200);
+                    }
+                };
+                poll();
             } catch (e) {
                 showFeedback('danger', `<i class=\"bi bi-exclamation-octagon me-2\"></i>Refresh failed: ${e.message}`);
+                btn.disabled = false; btn.innerHTML = original;
             }
             return;
         }

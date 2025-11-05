@@ -33,15 +33,15 @@ def _last_completed_ts() -> timezone.datetime | None:
 
 @receiver(user_logged_in)
 def trigger_refresh_on_login(sender, user, request, **kwargs):  # noqa: ANN001
-    # Allow staff or superuser (admin) to trigger
-    if not (getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)):
+    # Allow any authenticated user to trigger (employee or admin)
+    if not getattr(user, "is_authenticated", False):
         return
 
-    # Refresh interval (minutes); default 24h
+    # Refresh interval (minutes); default 12h unless overridden
     try:
-        interval_min = int(os.environ.get("REFRESH_INTERVAL_MINUTES", "1440"))
+        interval_min = int(os.environ.get("REFRESH_INTERVAL_MINUTES", "720"))
     except Exception:
-        interval_min = 1440
+        interval_min = 720
 
     # Skip if another refresh is running
     try:

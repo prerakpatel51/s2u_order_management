@@ -41,3 +41,13 @@ If you prefer a resident worker with a scheduler instead of Railway Cron:
 3) Ensure env vars exist on both services: `DJANGO_SETTINGS_MODULE`, `DATABASE_URL`, `REDIS_URL`, Korona creds.
 
 4) The schedule in `settings.py` runs `inventory.tasks.nightly_full_sync` at 04:00 UTC daily. Adjust by changing `CELERY_BEAT_SCHEDULE` or set `MONTHLY_DAYS` env var.
+
+## Auto-Refresh on Login
+
+- When any authenticated user logs in, the app checks when the last full refresh completed and, if older than 12 hours, starts a background refresh (stores → products → stocks → monthly sales). The default interval can be overridden with `REFRESH_INTERVAL_MINUTES` (minutes; default `720`).
+- While a refresh is in progress, the Dashboard shows a progress bar. Admins (staff/superusers) see a “Refresh Data” button and can now also cancel an ongoing refresh from the same notice.
+
+Endpoints involved (login required):
+- `POST /api/refresh/start/` – start a full refresh.
+- `GET  /api/refresh/status/?job=<id>` – poll job status.
+- `POST /api/refresh/cancel/` – request cancellation; it takes effect between phases.

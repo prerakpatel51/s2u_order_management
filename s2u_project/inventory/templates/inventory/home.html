@@ -41,7 +41,15 @@
     <div class="container-xl">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
             <h2 class="h4 mb-0 text-primary"><i class="bi bi-clipboard-check me-2"></i>Weekly Lists by Store</h2>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-3 align-items-center flex-wrap">
+              <div class="text-muted small">
+                Last updated:
+                {% if last_refresh_completed_at %}
+                  {{ last_refresh_completed_at|date:"M j, Y h:i A" }}
+                {% else %}
+                  —
+                {% endif %}
+              </div>
               {% if can_refresh %}
               <button id="refreshAllBtn" class="btn btn-sm btn-outline-primary">
                 <span class="spinner-border spinner-border-sm me-2 d-none" id="refreshAllSpin" role="status" aria-hidden="true"></span>
@@ -52,21 +60,26 @@
             </div>
         </div>
 
-        {% if can_refresh %}
         <div id="globalRefreshNotice" class="alert alert-info d-none" role="alert">
-          <div class="d-flex align-items-center justify-content-between">
+          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
             <div class="me-3">
               <div class="fw-semibold" id="refreshStatusMsg"><i class="bi bi-cloud-arrow-down me-2"></i>Preparing refresh...</div>
               <div class="small text-muted" id="refreshStatusDetail"></div>
             </div>
-            <div class="flex-grow-1 ms-3">
+            <div class="flex-grow-1 ms-3" style="min-width:260px;">
               <div class="progress" style="height: 8px;">
                 <div id="refreshProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
               </div>
             </div>
+            {% if can_refresh %}
+            <div class="ms-auto">
+              <button id="refreshCancelBtn" class="btn btn-sm btn-outline-danger" type="button">
+                <i class="bi bi-x-circle me-1"></i>Cancel Update
+              </button>
+            </div>
+            {% endif %}
           </div>
         </div>
-        {% endif %}
 
         <form id="filters-form" class="card border-0 shadow-sm mb-4" method="get">
             <div class="card-body py-3 lists-toolbar">
@@ -177,7 +190,6 @@
 {# Removed JS for quick presets per request #}
 
 {% block extra_scripts %}
-{% if can_refresh %}
 <script>
   (function() {
     const btn = document.getElementById('refreshAllBtn');
@@ -186,6 +198,7 @@
     const msg = document.getElementById('refreshStatusMsg');
     const detail = document.getElementById('refreshStatusDetail');
     const bar = document.getElementById('refreshProgressBar');
+    const cancelBtn = document.getElementById('refreshCancelBtn');
     let pollTimer = null;
 
     function showNotice(kind) {
@@ -215,10 +228,14 @@
         if (data.done) {
           clearInterval(pollTimer);
           spin?.classList.add('d-none');
-          btn.disabled = false;
+          if (typeof btn !== 'undefined' && btn) btn.disabled = false;
+          if (typeof cancelBtn !== 'undefined' && cancelBtn) cancelBtn.disabled = true;
           if (data.step === 'error') {
             showNotice('danger');
             msg.innerHTML = `<i class="bi bi-exclamation-octagon me-2"></i>${data.message || 'Failed'}`;
+          } else if (data.step === 'cancelled') {
+            showNotice('warning');
+            msg.innerHTML = `<i class="bi bi-slash-circle me-2"></i>Update cancelled.`;
           } else {
             showNotice('success');
             msg.innerHTML = `<i class="bi bi-check-circle me-2"></i>Refresh complete.`;
@@ -234,7 +251,7 @@
     }
 
     async function startRefresh() {
-      btn.disabled = true;
+      if (typeof btn !== 'undefined' && btn) btn.disabled = true;
       spin?.classList.remove('d-none');
       showNotice('info');
       bar.style.width = '0%';
@@ -247,7 +264,7 @@
           showNotice('warning');
           msg.innerHTML = `<i class="bi bi-exclamation-triangle me-2"></i>A refresh is already running.`;
           spin?.classList.add('d-none');
-          btn.disabled = false;
+          if (typeof btn !== 'undefined' && btn) btn.disabled = false;
           return;
         }
         const data = await res.json();
@@ -257,7 +274,7 @@
         showNotice('danger');
         msg.innerHTML = `<i class="bi bi-exclamation-octagon me-2"></i>${err.message}`;
         spin?.classList.add('d-none');
-        btn.disabled = false;
+        if (typeof btn !== 'undefined' && btn) btn.disabled = false;
       }
     }
 
@@ -281,7 +298,25 @@
         startRefresh();
       });
     }
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', async () => {
+        try {
+          cancelBtn.disabled = true;
+          showNotice('warning');
+          msg.innerHTML = `<i class=\"bi bi-slash-circle me-2\"></i>Cancelling...`;
+          const form = new FormData();
+          const current = "{{ active_refresh_job|default:'' }}";
+          if (current) form.set('job', current);
+          const res = await fetch(`{% url 'inventory:refresh_all_cancel' %}`, { method: 'POST', body: form, headers: { 'X-CSRFToken': getCsrfToken() } });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || 'Cancel failed');
+        } catch (err) {
+          showNotice('danger');
+          msg.innerHTML = `<i class=\"bi bi-exclamation-octagon me-2\"></i>${err.message}`;
+          cancelBtn.disabled = false;
+        }
+      });
+    }
   })();
 </script>
-{% endif %}
 {% endblock %}

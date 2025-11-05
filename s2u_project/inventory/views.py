@@ -38,6 +38,38 @@ def _refresh_job_key(job_id: str) -> str:
 def _refresh_lock_key() -> str:
     return "refresh_job:lock"
 
+# Cancellation key per job
+def _refresh_cancel_key(job_id: str) -> str:
+    return f"refresh_job:{job_id}:cancel"
+
+def _is_cancelled(job_id: str) -> bool:
+    try:
+        val = redis_client.get(_refresh_cancel_key(job_id))
+        return bool(val)
+    except Exception:
+        return False
+
+
+def _last_completed_ts_view() -> Optional[timezone.datetime]:
+    """Read the last-completed refresh timestamp from Redis as a timezone-aware datetime."""
+    try:
+        data = redis_client.get("refresh:last_completed_at")
+        if not data:
+            return None
+        import json
+        obj = json.loads(data)
+        ts = obj.get("ts")
+        if not ts:
+            return None
+        try:
+            from django.utils.dateparse import parse_datetime
+            dt = parse_datetime(ts)
+            return dt
+        except Exception:
+            return None
+    except Exception:
+        return None
+
 
 # Staff check helper used by admin-only views
 def _staff_required(user):
@@ -508,8 +540,10 @@ def home(request):
             "selected_store": selected_store,
             "date_from": date_from_raw,
             "date_to": date_to_raw,
-            "can_refresh": bool(getattr(request.user, "is_staff", False) or getattr(request.user, "is_superuser", False)),
+            # Allow any authenticated user (employee or admin) to start/cancel refresh
+            "can_refresh": bool(getattr(request.user, "is_authenticated", False)),
             "active_refresh_job": active_job,
+            "last_refresh_completed_at": _last_completed_ts_view(),
         },
     )
 
@@ -873,12 +907,22 @@ def _run_refresh_job(job_id: str, user_id: int) -> None:
 
         _update_progress(job_id, {"step": "init", "message": "Starting refresh...", "done": False, "progress": 0})
 
+        # Allow early cancel
+        if _is_cancelled(job_id):
+            _update_progress(job_id, {"step": "cancelled", "message": "Cancelled by user.", "done": True})
+            return
+
         # Step 1: Sync stores
         _update_progress(job_id, {"step": "stores", "message": "Syncing stores...", "progress": 5})
         call_command("sync_stores")
         stores_qs = Store.objects.filter(active=True)
         stores_count = stores_qs.count()
         _update_progress(job_id, {"stores": stores_count, "progress": 40, "message": f"Stores synced: {stores_count}"})
+
+        # Check cancel
+        if _is_cancelled(job_id):
+            _update_progress(job_id, {"step": "cancelled", "message": "Cancelled by user.", "done": True})
+            return
 
         # Step 2: Sync products
         _update_progress(job_id, {"step": "products", "message": "Syncing products...", "progress": 45})
@@ -887,10 +931,20 @@ def _run_refresh_job(job_id: str, user_id: int) -> None:
         products_count = products_qs.count()
         _update_progress(job_id, {"products": products_count, "progress": 60, "message": f"Products synced: {products_count}"})
 
+        # Check cancel
+        if _is_cancelled(job_id):
+            _update_progress(job_id, {"step": "cancelled", "message": "Cancelled by user.", "done": True})
+            return
+
         # Step 3: Sync stocks for all products
         _update_progress(job_id, {"step": "stocks", "message": "Syncing stocks...", "progress": 75})
         call_command("sync_stocks")
         _update_progress(job_id, {"progress": 88, "message": "Stocks synced"})
+
+        # Check cancel
+        if _is_cancelled(job_id):
+            _update_progress(job_id, {"step": "cancelled", "message": "Cancelled by user.", "done": True})
+            return
 
         # Step 4: Precompute monthly sales for all products
         _update_progress(job_id, {"step": "monthly", "message": "Calculating monthly sales...", "progress": 92})
@@ -950,8 +1004,8 @@ def start_global_refresh_async(user_id: int) -> Optional[str]:
     return job_id
 
 
+@ratelimit(key='user_or_ip', rate='5/m', method='POST', block=True)
 @login_required
-@user_passes_test(_staff_required)
 def refresh_all_start_api(request):
     """Start an async refresh job. Returns a job ID for polling."""
     job_id = start_global_refresh_async(request.user.id)
@@ -961,7 +1015,6 @@ def refresh_all_start_api(request):
 
 
 @login_required
-@user_passes_test(_staff_required)
 def refresh_all_status_api(request):
     """Return status of a refresh job given ?job=<job_id>."""
     job_id = (request.GET.get("job") or "").strip()
@@ -971,6 +1024,33 @@ def refresh_all_status_api(request):
     if not data:
         return JsonResponse({"ok": False, "error": "Job not found"}, status=404)
     return JsonResponse({"ok": True, **data})
+
+
+@ratelimit(key='user_or_ip', rate='5/m', method='POST', block=True)
+@login_required
+def refresh_all_cancel_api(request):
+    """Signal a running refresh job to cancel at the next checkpoint."""
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
+
+    # Cancel a specific job or the current one
+    job_id = (request.POST.get("job") or "").strip()
+    if not job_id:
+        try:
+            cur = redis_client.get("refresh:current_job")
+            if cur:
+                job_id = str(cur)
+        except Exception:
+            job_id = ""
+    if not job_id:
+        return JsonResponse({"ok": False, "error": "No active job."}, status=404)
+
+    try:
+        redis_client.set(_refresh_cancel_key(job_id), "1", ex=1800)
+    except Exception:
+        return JsonResponse({"ok": False, "error": "Failed to request cancel."}, status=500)
+
+    return JsonResponse({"ok": True, "job": job_id, "cancelled": True})
 
 
 @login_required
@@ -2736,3 +2816,114 @@ def logout_view(request):
         logout(request)
         return redirect("inventory:home")
     return JsonResponse({"error": "Method not allowed. Use POST."}, status=405)
+def _item_refresh_job_key(job_id: str) -> str:
+    return f"item_refresh:{job_id}"
+
+def _item_refresh_lock_key(product_number: int) -> str:
+    return f"item_refresh:lock:{product_number}"
+
+def _update_item_job(job_id: str, payload: Dict) -> None:
+    key = _item_refresh_job_key(job_id)
+    current = redis_get_json(key, {}) or {}
+    current.update(payload)
+    redis_set_json(key, current, ex=900)
+
+def _run_item_refresh_job(job_id: str, product_number: int, store_id: Optional[int]) -> None:
+    """Background worker to refresh stock and monthly sales for a single product.
+
+    Args:
+        job_id: Redis job id to report progress
+        product_number: Product.number to refresh
+        store_id: Optional current store context (for convenience in UI)
+    """
+    try:
+        _update_item_job(job_id, {"step": "init", "message": "Starting…", "done": False, "progress": 0})
+
+        # 1) Refresh stock via management command limited to this product
+        _update_item_job(job_id, {"step": "stock", "message": "Refreshing stock…", "progress": 30})
+        try:
+            call_command("sync_stocks", "--product", str(product_number))
+        except Exception as exc:
+            _update_item_job(job_id, {"step": "error", "message": f"Stock sync failed: {exc}", "error": str(exc), "done": True})
+            return
+
+        _update_item_job(job_id, {"progress": 60, "message": "Stock updated."})
+
+        # 2) Refresh monthly sales for this product across active stores (30 days)
+        _update_item_job(job_id, {"step": "monthly", "message": "Calculating monthly sales…", "progress": 70})
+        try:
+            from .models import Product, Store, MonthlySales
+            from .korona import calculate_monthly_sales_bulk
+
+            product = Product.objects.get(number=product_number)
+            stores = list(Store.objects.filter(active=True, korona_id__isnull=False))
+            pairs = [(s.id, str(s.korona_id)) for s in stores]
+            sales = calculate_monthly_sales_bulk(str(product.korona_id), pairs, days=30)
+
+            # Update DB and Redis for fast subsequent reads
+            for s in stores:
+                qty = int(sales.get(s.id, 0))
+                MonthlySales.objects.update_or_create(
+                    product=product,
+                    store=s,
+                    defaults={"quantity_sold": qty, "days_calculated": 30},
+                )
+                try:
+                    redis_client.set(f"monthly_sales:{product.number}:{s.id}", qty, ex=3600)
+                except Exception:
+                    pass
+        except Exception as exc:
+            _update_item_job(job_id, {"step": "error", "message": f"Monthly calc failed: {exc}", "error": str(exc), "done": True})
+            return
+
+        _update_item_job(job_id, {"step": "done", "message": "Item refresh complete.", "progress": 100, "done": True})
+    finally:
+        # Release lock
+        try:
+            redis_delete(_item_refresh_lock_key(product_number))
+        except Exception:
+            pass
+
+
+@ratelimit(key='user_or_ip', rate='30/m', method='POST', block=True)
+@login_required
+def weekly_item_refresh_start(request, list_id: int, product_number: int):
+    """Start async refresh (stock + monthly) for a single product on weekly page.
+
+    Returns JSON with a job id for polling.
+    """
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
+
+    # Validate list exists (basic scope check)
+    try:
+        from .models import WeeklyOrderList
+        WeeklyOrderList.objects.only('id').get(pk=list_id)
+    except Exception:
+        return JsonResponse({"ok": False, "error": "List not found"}, status=404)
+
+    # Prevent overlapping refresh for the same product
+    try:
+        if not redis_setnx(_item_refresh_lock_key(product_number), request.user.id, ex=600):
+            return JsonResponse({"ok": False, "error": "Refresh already running for this product."}, status=409)
+    except Exception:
+        pass
+
+    job_id = uuid.uuid4().hex
+    redis_set_json(_item_refresh_job_key(job_id), {"step": "queued", "progress": 0, "done": False, "product": product_number}, ex=900)
+    t = threading.Thread(target=_run_item_refresh_job, args=(job_id, product_number, None), daemon=True)
+    t.start()
+    return JsonResponse({"ok": True, "job": job_id})
+
+
+@ratelimit(key='user_or_ip', rate='120/m', method='GET', block=True)
+@login_required
+@require_GET
+def weekly_item_refresh_status(request):
+    job_id = (request.GET.get("job") or "").strip()
+    if not job_id:
+        return JsonResponse({"ok": False, "error": "Missing job id"}, status=400)
+    data = redis_get_json(_item_refresh_job_key(job_id))
+    if not data:
+        return JsonResponse({"ok": False, "error": "Job not found"}, status=404)
+    return JsonResponse({"ok": True, **data})

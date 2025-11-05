@@ -15,6 +15,7 @@ urlpatterns = [
     # Global refresh orchestration (async)
     path("api/refresh/start/", views.refresh_all_start_api, name="refresh_all_start"),
     path("api/refresh/status/", views.refresh_all_status_api, name="refresh_all_status"),
+    path("api/refresh/cancel/", views.refresh_all_cancel_api, name="refresh_all_cancel"),
     # Public About page
     path("about/", views.about, name="about"),
     # Weekly list URLs
@@ -32,6 +33,9 @@ urlpatterns = [
     path("weekly/<int:list_id>/export/excel/custom/", views.weekly_export_excel_custom, name="weekly_export_excel_custom"),
     path("weekly/<int:list_id>/export/pdf/custom/", views.weekly_export_pdf_custom, name="weekly_export_pdf_custom"),
     path("weekly/<int:list_id>/export/custom/", views.weekly_export_custom, name="weekly_export_custom"),
+    # Per-item async refresh (stock + monthly)
+    path("weekly/<int:list_id>/item/<int:product_number>/refresh/start/", views.weekly_item_refresh_start, name="weekly_item_refresh_start"),
+    path("api/weekly/item/refresh/status/", views.weekly_item_refresh_status, name="weekly_item_refresh_status"),
     # Admin user management
     path("admin/users/", views.user_manage, name="user_manage"),
 ]
