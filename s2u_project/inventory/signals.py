@@ -11,26 +11,27 @@ from django.dispatch import receiver
 from django.utils import timezone
 
 from .redis_client import r as redis_client
-from .redis_client import exists as redis_exists
+from .redis_client import exists as redis_exists, get_json as redis_get_json
 from .views import _refresh_lock_key, start_global_refresh_async
 
 
 def _last_completed_ts() -> timezone.datetime | None:
+    """Return last completed global refresh timestamp (tz-aware) if present.
+
+    Parses using Django's parse_datetime for robustness (handles many ISO forms).
+    """
     try:
-        data = redis_client.get("refresh:last_completed_at")
-        if not data:
-            return None
-        import json
-        obj = json.loads(data)
+        obj = redis_get_json("refresh:last_completed_at") or {}
         ts = obj.get("ts")
         if not ts:
             return None
-        # parse ISO timestamp
-        try:
-            from datetime import datetime
-            return datetime.fromisoformat(ts).astimezone(timezone.utc)
-        except Exception:
+        from django.utils.dateparse import parse_datetime
+        dt = parse_datetime(ts)
+        if dt is None:
             return None
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.utc)
+        return dt.astimezone(timezone.utc)
     except Exception:
         return None
 
@@ -57,8 +58,9 @@ def trigger_refresh_on_login(sender, user, request, **kwargs):  # noqa: ANN001
     last = _last_completed_ts()
     now = timezone.now()
     if not last or (now - last) >= timedelta(minutes=interval_min):
-        # Start in background; UI will auto-detect and show progress
-        start_global_refresh_async(user.id)
+        # Start in background; UI will auto-detect and show progress.
+        # Pass a sentinel user id (0) so it is independent of who logged in.
+        start_global_refresh_async(0)
 
 
 # Enforce username rules: case-insensitive + no spaces (single word)
