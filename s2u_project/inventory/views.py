@@ -1484,7 +1484,6 @@ def weekly_list_detail(request, list_id):
                 "barcode": item.product.barcode,
                 "barcodes": [b.code for b in getattr(item.product, 'barcodes').all()] if hasattr(item.product, 'barcodes') else ([item.product.barcode] if item.product.barcode else []),
                 "supplier_name": item.product.supplier_name,
-                "order_code": getattr(item.product, 'order_code', "") or "",
                 "on_shelf": item.on_shelf,
                 "monthly_needed": item.monthly_needed,
                 "system_stock": float(item.system_stock),
@@ -1709,7 +1708,6 @@ def weekly_add_item_api(request, list_id):
                 "barcode": product.barcode,
                 "barcodes": list(ProductBarcode.objects.filter(product=product).values_list("code", flat=True)) if 'ProductBarcode' in globals() else [],
                 "supplier_name": product.supplier_name,
-                "order_code": getattr(product, 'order_code', "") or "",
                 "on_shelf": item.on_shelf,
                 "monthly_needed": item.monthly_needed,
                 "system_stock": float(item.system_stock),
@@ -1810,7 +1808,6 @@ def weekly_update_item_api(request, list_id, item_id):
                 "barcode": item.product.barcode,
                 "barcodes": list(ProductBarcode.objects.filter(product=item.product).values_list("code", flat=True)) if 'ProductBarcode' in globals() else [],
                 "supplier_name": item.product.supplier_name,
-                "order_code": getattr(item.product, 'order_code', "") or "",
                 "on_shelf": item.on_shelf,
                 "monthly_needed": item.monthly_needed,
                 "system_stock": float(item.system_stock),
@@ -1871,12 +1868,17 @@ def weekly_export_excel(request, list_id):
     title_text = f"Weekly Order List - {order_list.store.name} (#{order_list.store.number})"
     subtitle_text = f"Week of {order_list.target_date} • Generated on {dj_tz.now().astimezone().strftime('%Y-%m-%d %H:%M')} by {user_name}"
 
-    # Add headers (include Order Code)
+    max_cols = len(headers)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_cols)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max_cols)
+    ws.cell(row=1, column=1, value=title_text).font = Font(bold=True, size=14)
+    ws.cell(row=2, column=1, value=subtitle_text).font = Font(color="666666")
+
+    # Add headers
     headers = [
         "Product #",
         "Product Name",
         "Barcode",
-        "Order Code",
         "Supplier",
         "System Stock",
         "On Shelf",
@@ -1886,12 +1888,6 @@ def weekly_export_excel(request, list_id):
         "BT",
         "SQW",
     ]
-
-    max_cols = len(headers)
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_cols)
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max_cols)
-    ws.cell(row=1, column=1, value=title_text).font = Font(bold=True, size=14)
-    ws.cell(row=2, column=1, value=subtitle_text).font = Font(color="666666")
     ws.append([None] * len(headers))  # placeholder for row 3 (merged rows took 1-2)
     ws.append(headers)  # row 4
 
@@ -1918,7 +1914,6 @@ def weekly_export_excel(request, list_id):
             item.product.number,
             item.product.name,
             item.product.barcode or "",
-            getattr(item.product, 'order_code', "") or "",
             item.product.supplier_name or "",
             float(item.system_stock),
             item.on_shelf,
@@ -1944,7 +1939,7 @@ def weekly_export_excel(request, list_id):
 
     # Auto-adjust column widths with caps
     from openpyxl.utils import get_column_letter
-    widths = {1: 11, 2: 28, 3: 14, 4: 16, 5: 22, 6: 12, 7: 11, 8: 12, 9: 15, 10: 8, 11: 8, 12: 8}
+    widths = {1: 11, 2: 28, 3: 14, 4: 22, 5: 12, 6: 11, 7: 12, 8: 15, 9: 8, 10: 8, 11: 8}
     for col_idx in range(1, len(headers) + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 14)
 
@@ -2025,7 +2020,6 @@ def weekly_export_excel_custom(request, list_id):
         "product_number": "Product #",
         "product_name": "Product Name",
         "barcode": "Barcode",
-        "order_code": "Order Code",
         "supplier": "Supplier",
         "system_stock": "System Stock",
         "on_shelf": "On Shelf",
@@ -2199,7 +2193,6 @@ def weekly_export_pdf(request, list_id):
         "Product #",
         "Product Name",
         "Barcode",
-        "Order Code",
         "Supplier",
         "System Stock",
         "On Shelf",
@@ -2228,7 +2221,6 @@ def weekly_export_pdf(request, list_id):
                 P(item.product.number),
                 P(item.product.name),
                 P(item.product.barcode or "—"),
-                P(getattr(item, 'order_code', "") or "—"),
                 P(item.product.supplier_name or "—"),
                 P(f"{float(item.system_stock):.2f}"),
                 P(item.on_shelf),
@@ -2241,7 +2233,7 @@ def weekly_export_pdf(request, list_id):
         )
 
     # Build dynamic column widths that fit within page width
-    base_widths = [0.9, 2.8, 1.4, 1.2, 2.6, 1.0, 0.9, 1.1, 1.1, 0.8, 0.8, 0.8]  # inches
+    base_widths = [0.9, 2.8, 1.4, 2.6, 1.0, 0.9, 1.1, 1.1, 0.8, 0.8, 0.8]  # inches
     col_widths = [w * inch for w in base_widths[: len(headers)]]
     table = Table([headers] + table_rows, colWidths=col_widths, repeatRows=1)
 
@@ -2351,7 +2343,6 @@ def weekly_export_pdf_custom(request, list_id):
         "product_number": "Product #",
         "product_name": "Product Name",
         "barcode": "Barcode",
-        "order_code": "Order Code",
         "supplier": "Supplier",
         "system_stock": "System Stock",
         "on_shelf": "On Shelf",
@@ -2397,8 +2388,6 @@ def weekly_export_pdf_custom(request, list_id):
                 row.append(P(it.product.barcode or "—"))
             elif key == "supplier":
                 row.append(P(it.product.supplier_name or "—"))
-            elif key == "order_code":
-                row.append(P(getattr(it.product, 'order_code', "") or "—"))
             elif key == "system_stock":
                 row.append(P(f"{float(it.system_stock):.2f}"))
             elif key == "on_shelf":
@@ -2424,7 +2413,6 @@ def weekly_export_pdf_custom(request, list_id):
         "Product #": 0.9,
         "Product Name": 2.8,
         "Barcode": 1.4,
-        "Order Code": 1.2,
         "Supplier": 2.6,
         "System Stock": 1.0,
         "On Shelf": 1.0,
@@ -2494,12 +2482,12 @@ def weekly_export_custom(request, list_id):
             transfer_from__isnull=False,
             transfer_bottles__gt=0
         ).order_by("product__name")
-        columns = ["Product Name", "Barcode", "Order Code", "Supplier", "Transfer From", "Transfer Bottles"]
+        columns = ["Product Name", "Barcode", "Supplier", "Transfer From", "Transfer Bottles"]
     else:
         # Joe/BT/SQW: respective field > 0
         filter_kwargs = {f"{export_type}__gt": 0}
         items = order_list.items.select_related("product").filter(**filter_kwargs).order_by("product__name")
-        columns = ["Product Name", "Barcode", "Order Code", "Supplier", "System Stock", export_type.upper()]
+        columns = ["Product Name", "Barcode", "Supplier", "System Stock", export_type.upper()]
 
     logger.info(f"[EXPORT] Found {items.count()} items matching filter")
 
@@ -2551,7 +2539,6 @@ def _export_custom_excel(request, order_list, items, export_type, columns):
             row_data = [
                 item.product.name,
                 item.product.barcode or '',
-                getattr(item.product, 'order_code', '') or '',
                 item.product.supplier_name or '',
                 f"{item.transfer_from.name} (#{item.transfer_from.number})" if item.transfer_from else '',
                 item.transfer_bottles or 0
@@ -2560,7 +2547,6 @@ def _export_custom_excel(request, order_list, items, export_type, columns):
             row_data = [
                 item.product.name,
                 item.product.barcode or '',
-                getattr(item.product, 'order_code', '') or '',
                 item.product.supplier_name or '',
                 item.system_stock or 0,
                 getattr(item, export_type, 0) or 0
@@ -2637,7 +2623,6 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
             row_data = [
                 item.product.name[:40],
                 item.product.barcode or '',
-                (getattr(item, 'order_code', '') or '')[:20],
                 item.product.supplier_name[:20] if item.product.supplier_name else '',
                 f"{item.transfer_from.name} (#{item.transfer_from.number})" if item.transfer_from else '',
                 str(item.transfer_bottles or 0)
@@ -2646,7 +2631,6 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
             row_data = [
                 item.product.name[:40],
                 item.product.barcode or '',
-                (getattr(item, 'order_code', '') or '')[:20],
                 item.product.supplier_name[:20] if item.product.supplier_name else '',
                 str(item.system_stock or 0),
                 str(getattr(item, export_type, 0) or 0)

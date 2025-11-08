@@ -62,56 +62,6 @@ def extract_supplier(product: dict) -> str:
     return ""
 
 
-def extract_order_code(product: dict) -> str:
-    """Best-effort extraction of a supplier order code/number from Korona product payload.
-
-    Tries common fields observed in Korona schemas under ``supplierPrices`` and at
-    the top level. Falls back to empty string when not present.
-
-    This is intentionally forgiving: if multiple entries exist, returns the first
-    non-empty candidate.
-    """
-    # 1) supplierPrices[*] common fields
-    candidates = []
-    for entry in (product.get("supplierPrices") or []):
-        if not isinstance(entry, dict):
-            continue
-        for key in (
-            "supplierProductNumber",
-            "supplierProductCode",
-            "supplierItemNumber",
-            "supplierSku",
-            "orderNumber",
-            "articleNumber",
-            "itemNumber",
-        ):
-            val = entry.get(key)
-            if isinstance(val, (str, int)):
-                s = str(val).strip()
-                if s:
-                    candidates.append(s)
-        # Some APIs nest the code under entry["product"]
-        prod = entry.get("product")
-        if isinstance(prod, dict):
-            for key in ("supplierProductNumber", "orderNumber", "articleNumber"):
-                val = prod.get(key)
-                if isinstance(val, (str, int)):
-                    s = str(val).strip()
-                    if s:
-                        candidates.append(s)
-
-    # 2) Top-level fallbacks (rare but cheap to check)
-    for key in ("supplierProductNumber", "orderNumber", "articleNumber"):
-        val = product.get(key)
-        if isinstance(val, (str, int)):
-            s = str(val).strip()
-            if s:
-                candidates.append(s)
-
-    # Return first candidate
-    return candidates[0] if candidates else ""
-
-
 def fetch_products() -> List[Dict[str, object]]:
     """Fetch all products from Korona and normalize fields for storage.
 
@@ -132,7 +82,6 @@ def fetch_products() -> List[Dict[str, object]]:
                 "name": str(product.get("name", "")).strip(),
                 "barcodes": extract_barcodes(product),
                 "supplier_name": extract_supplier(product),
-                "order_code": extract_order_code(product),
             }
         )
     return rows
@@ -151,7 +100,7 @@ def save_products_csv(filename: Path, products: Sequence[Dict[str, str]]) -> Non
     with filename.open("w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(
             csvfile,
-            fieldnames=["number", "name", "barcode", "order_code", "supplier_name"],
+            fieldnames=["number", "name", "barcode", "supplier_name"],
             extrasaction="ignore",
         )
         writer.writeheader()
@@ -244,7 +193,6 @@ class Command(BaseCommand):
                 "name": name,
                 "barcode": first_barcode,
                 "supplier_name": supplier_name,
-                "order_code": str(row.get("order_code", "")).strip(),
             }
 
             if korona_id:

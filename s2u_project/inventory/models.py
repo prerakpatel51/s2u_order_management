@@ -35,7 +35,6 @@ class Product(models.Model):
     name = models.CharField(max_length=255, db_index=True)
     barcode = models.CharField(max_length=64, blank=True)
     supplier_name = models.CharField(max_length=255, blank=True)
-    order_code = models.CharField(max_length=64, blank=True)
 
     stores = models.ManyToManyField(
         Store,
@@ -133,8 +132,6 @@ class WeeklyOrderItem(models.Model):
     on_shelf = models.PositiveIntegerField(default=1)
     monthly_needed = models.PositiveIntegerField(default=0)
     system_stock = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    # Optional: supplier order code for ordering/reference
-    order_code = models.CharField(max_length=64, blank=True)
     added_at = models.DateTimeField(auto_now_add=True)
     # Admin-only planning fields
     transfer_from = models.ForeignKey(

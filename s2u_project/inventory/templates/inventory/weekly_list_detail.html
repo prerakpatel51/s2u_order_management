@@ -288,7 +288,6 @@
                                             <div class="form-check"><input class="form-check-input exp-col" id="c-num" type="checkbox" data-key="product_number" checked><label class="form-check-label" for="c-num">Product #</label></div>
                                             <div class="form-check"><input class="form-check-input exp-col" id="c-name" type="checkbox" data-key="product_name" checked><label class="form-check-label" for="c-name">Product Name</label></div>
                                             <div class="form-check"><input class="form-check-input exp-col" id="c-barcode" type="checkbox" data-key="barcode"><label class="form-check-label" for="c-barcode">Barcode</label></div>
-                                            <div class="form-check"><input class="form-check-input exp-col" id="c-ordercode" type="checkbox" data-key="order_code"><label class="form-check-label" for="c-ordercode">Order Code</label></div>
                                             <div class="form-check"><input class="form-check-input exp-col" id="c-supplier" type="checkbox" data-key="supplier" checked><label class="form-check-label" for="c-supplier">Supplier</label></div>
                                         </div>
                                         <div class="col-6 col-md-4">
@@ -370,7 +369,6 @@
                                     <th scope="col">#</th>
                                     <th scope="col">Product Name</th>
                                     <th scope="col">Barcode</th>
-                                    <th scope="col">Order Code</th>
                                     <th scope="col">Sup</th>
                                     <th scope="col" class="text-center sc-current wrap-header">System<br>Stock</th>
                                     <th scope="col" class="text-center sc-current">On Shelf</th>
@@ -586,7 +584,6 @@
                             return arr.map(c => `<div class="small text-muted">${escapeAttr(c)}</div>`).join('');
                         })()}
                     </td>
-                    <td class="align-middle">${escapeAttr(item.order_code || '—')}</td>
                     <td class="align-middle"><span class="sup-badge" data-bs-toggle="tooltip" data-bs-placement="top" title="${supFull}">${supAbbr}</span></td>
                     <td class=\"text-center numeric sc-current\"><div>${systemStock}</div>${monthlySalesDisplay}</td>
                     <td class="text-center sc-current">

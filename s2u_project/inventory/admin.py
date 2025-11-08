@@ -15,7 +15,7 @@ class StoreAdmin(admin.ModelAdmin):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ("number", "name", "barcode", "order_code", "supplier_name")
+    list_display = ("number", "name", "barcode", "supplier_name")
     search_fields = ("number", "name", "barcode", "supplier_name")
     list_filter = ("supplier_name",)
 
@@ -45,7 +45,6 @@ class WeeklyOrderItemAdmin(admin.ModelAdmin):
     list_display = (
         "order_list",
         "product",
-        "_product_order_code",
         "on_shelf",
         "monthly_needed",
         "system_stock",
@@ -58,10 +57,6 @@ class WeeklyOrderItemAdmin(admin.ModelAdmin):
     )
     list_filter = ("order_list__store",)
     search_fields = ("product__name", "product__number", "order_list__store__name")
-
-    def _product_order_code(self, obj):  # pragma: no cover - admin display helper
-        return getattr(getattr(obj, 'product', None), 'order_code', '') or ''
-    _product_order_code.short_description = 'Order Code'
 
 
 @admin.register(MonthlySales)
