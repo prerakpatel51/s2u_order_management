@@ -743,6 +743,8 @@
             if (suggestions.length === 0) {
                 hideSuggestions();
                 showFeedback('info', `<i class="bi bi-exclamation-triangle me-2"></i>No products found matching “${query}”.`);
+                // If this looked like a barcode, give an error beep for quick feedback
+                try { if (/^\d{6,}$/.test(query)) playBeep(false); } catch (_) {}
                 return;
             }
 
