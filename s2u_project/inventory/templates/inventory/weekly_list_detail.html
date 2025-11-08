@@ -1168,7 +1168,9 @@
                                     items.set(it.product_number, it);
                                 }
                             }
-                            await fetchMonthlySales(productNumber, false);
+                            // Ensure we bypass any stale client cache after a refresh
+                            try { localStorage.removeItem(msKey(productNumber)); } catch (_) {}
+                            await fetchMonthlySales(productNumber, true);
                             renderTable();
                             showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Updated #${productNumber}.`);
                             btn.disabled = false; btn.innerHTML = original;
@@ -1455,7 +1457,9 @@
                                         it.other_stocks = { ...(it.other_stocks || {}), ...otherMap };
                                         items.set(it.product_number, it);
                                     }
-                                    await fetchMonthlySales(it.product_number, false);
+                                    // After server job completes, force-refresh monthly and clear client cache
+                                    try { localStorage.removeItem(msKey(it.product_number)); } catch (_) {}
+                                    await fetchMonthlySales(it.product_number, true);
                                 } catch (e) { console.warn('Post-refresh update failed', e); }
                             }
                             renderTable();
