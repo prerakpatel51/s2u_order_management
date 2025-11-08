@@ -464,23 +464,41 @@
         );
     }
 
-    // Beep feedback for barcode scans
-    function playBeep(ok = true) {
+    // Beep feedback for barcode scans (with audio unlock)
+    let __audio = { ctx: null, unlocked: false };
+    function __ensureAudio() {
         try {
             const Ctx = window.AudioContext || window.webkitAudioContext;
-            if (!Ctx) return;
-            const ctx = new Ctx();
+            if (!Ctx) return false;
+            if (!__audio.ctx) __audio.ctx = new Ctx();
+            if (__audio.ctx.state === 'suspended') {
+                const p = __audio.ctx.resume?.();
+                if (p && typeof p.then === 'function') p.catch(() => {});
+            }
+            __audio.unlocked = true;
+            return true;
+        } catch (_) { return false; }
+    }
+    document.addEventListener('pointerdown', __ensureAudio, { once: true });
+    document.addEventListener('keydown', (e) => { if (!e.isComposing) __ensureAudio(); }, { once: true });
+
+    function playBeep(ok = true) {
+        try {
+            if (!__ensureAudio()) return;
+            const ctx = __audio.ctx;
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.type = 'sine';
             osc.frequency.value = ok ? 880 : 220;
             osc.connect(gain); gain.connect(ctx.destination);
-            gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.01);
-            const dur = ok ? 0.08 : 0.18;
-            osc.start();
-            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-            osc.stop(ctx.currentTime + dur + 0.02);
+            const now = ctx.currentTime;
+            const dur = ok ? 0.09 : 0.18;
+            const peak = ok ? 0.14 : 0.18;
+            gain.gain.setValueAtTime(0.0001, now);
+            gain.gain.linearRampToValueAtTime(peak, now + 0.006);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+            osc.start(now);
+            osc.stop(now + dur + 0.02);
         } catch (_) {}
     }
 
