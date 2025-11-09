@@ -1868,13 +1868,7 @@ def weekly_export_excel(request, list_id):
     title_text = f"Weekly Order List - {order_list.store.name} (#{order_list.store.number})"
     subtitle_text = f"Week of {order_list.target_date} • Generated on {dj_tz.now().astimezone().strftime('%Y-%m-%d %H:%M')} by {user_name}"
 
-    max_cols = len(headers)
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_cols)
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max_cols)
-    ws.cell(row=1, column=1, value=title_text).font = Font(bold=True, size=14)
-    ws.cell(row=2, column=1, value=subtitle_text).font = Font(color="666666")
-
-    # Add headers
+    # Add headers (define before using for merged title rows)
     headers = [
         "Product #",
         "Product Name",
@@ -1888,6 +1882,12 @@ def weekly_export_excel(request, list_id):
         "BT",
         "SQW",
     ]
+
+    max_cols = len(headers)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_cols)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max_cols)
+    ws.cell(row=1, column=1, value=title_text).font = Font(bold=True, size=14)
+    ws.cell(row=2, column=1, value=subtitle_text).font = Font(color="666666")
     ws.append([None] * len(headers))  # placeholder for row 3 (merged rows took 1-2)
     ws.append(headers)  # row 4
 
