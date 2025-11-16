@@ -11,7 +11,7 @@ from uuid import UUID
 import requests
 from django.core.management import call_command
 from django.db import OperationalError, transaction
-from django.db.models import Q, Prefetch, Count
+from django.db.models import Q, Prefetch, Count, F
 from django.http import JsonResponse, HttpResponseNotModified
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
@@ -1596,9 +1596,11 @@ def weekly_add_item_api(request, list_id):
         ).first()
 
         if existing_item:
-            # Increment on_shelf count
-            existing_item.on_shelf += 1
-            existing_item.save()
+            # Increment on_shelf atomically to avoid lost updates on rapid scans
+            from django.db import transaction as _tx
+            with _tx.atomic():
+                type(existing_item).objects.filter(pk=existing_item.pk).update(on_shelf=F("on_shelf") + 1)
+                existing_item.refresh_from_db(fields=["on_shelf"])  # ensure we return the latest value
             item = existing_item
         else:
             # Fetch system stock for this store (prefer fresh; fallback to DB cached)

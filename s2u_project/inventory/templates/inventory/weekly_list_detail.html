@@ -921,7 +921,17 @@
     })();
 
     async function addProduct(productNumber) {
+        // Optimistically update UI for rapid consecutive scans
+        const key = Number(productNumber);
+        let optimisticOnShelf = null;
         try {
+            const existingBefore = items.get(key);
+            if (existingBefore) {
+                optimisticOnShelf = Number(existingBefore.on_shelf || 0) + 1;
+                items.set(key, { ...existingBefore, on_shelf: optimisticOnShelf });
+                renderTable();
+            }
+
             const response = await fetch(`{% url 'inventory:weekly_add_item' order_list.id %}`, {
                 method: 'POST',
                 headers: {
@@ -934,7 +944,20 @@
                 throw new Error('Unable to add product');
             }
             const data = await response.json();
-            items = new Map([[data.product_number, data], ...items]);
+            // Never regress on-shelf due to out-of-order responses or concurrent scans
+            const current = items.get(key);
+            let finalOnShelf = Number(data.on_shelf || 0);
+            if (optimisticOnShelf != null) finalOnShelf = Math.max(finalOnShelf, optimisticOnShelf);
+            if (current && current.on_shelf != null) finalOnShelf = Math.max(finalOnShelf, Number(current.on_shelf));
+            data.on_shelf = finalOnShelf;
+            const merged = { ...(items.get(Number(data.product_number)) || {}), ...data };
+            if (existingBefore) {
+                // Update in place so latest value wins over previous entry
+                items = new Map([...items, [data.product_number, merged]]);
+            } else {
+                // New item: place at the top for visibility
+                items = new Map([[data.product_number, merged], ...items]);
+            }
             renderTable();
             showFeedback('success', `<i class=\"bi bi-check-circle me-2\"></i>Added \"${data.product_name}\".`);
 
