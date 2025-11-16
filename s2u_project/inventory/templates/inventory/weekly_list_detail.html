@@ -825,6 +825,8 @@
             queryInput.value = '';
             await addProduct(chosen.number);
             if (isBarcode) playBeep(true);
+            // Return focus for the next scan
+            try { queryInput.focus(); } catch (_) {}
         } catch (e) {
             showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${e.message || 'Unable to add product'}`);
         }
@@ -1116,8 +1118,8 @@
     function scheduleScanFinish() {
         if (!canEdit) return;
         const v = (queryInput.value || '').trim();
-        // Heuristic: numeric barcodes only (6+ digits)
-        if (!/^\d{6,}$/.test(v)) return;
+        // Heuristic: any non-whitespace 6+ chars (covers alphanumeric barcodes)
+        if (!/^\S{6,}$/.test(v)) return;
         if (scanIdleTimer) clearTimeout(scanIdleTimer);
         scanIdleTimer = setTimeout(async () => {
             const now = Date.now();
@@ -1159,7 +1161,7 @@
         // Many scanners send Tab instead of Enter — handle it too
         if (event.key === 'Tab') {
             const v = queryInput.value.trim();
-            if (/^\d{6,}$/.test(v)) {
+            if (/^\S{6,}$/.test(v)) {
                 event.preventDefault();
                 const now = Date.now();
                 if (!(lastScanSubmit.value === v && now < lastScanSubmit.until)) {
