@@ -139,6 +139,11 @@
     let tooltipInstances = [];
     let isProcessing = false;  // Prevent concurrent adds
 
+    // Scanner auto-finish configuration and state
+    const SCAN = { MIN_LEN: 6, IDLE_MS: 120, DUP_MS: 350 };
+    let scanIdleTimer = null;
+    let lastScanSubmit = { value: '', until: 0 };
+
     function escapeAttr(value) {
         return (value || '')
             .replace(/&/g, '&amp;')
@@ -202,6 +207,48 @@
             osc.start(now);
             osc.stop(now + dur + 0.02);
         } catch (_) {}
+    }
+
+    async function quickPickAndAddSearch(raw) {
+        const query = (raw || '').trim();
+        if (!query) return;
+        try {
+            const resp = await fetch(`{% url 'inventory:product_search_api' %}?q=${encodeURIComponent(query)}&page=1&page_size=10`);
+            if (!resp.ok) throw new Error('Search failed');
+            const data = await resp.json();
+            const pool = [...(data.matches || []), ...(data.suggestions || [])];
+            const isBarcode = /^\d{6,}$/.test(query);
+            if (pool.length === 0) {
+                feedback.innerHTML = `<i class=\"bi bi-exclamation-triangle me-1\"></i>No results for “${query}”.`;
+                if (isBarcode) playBeep(false);
+                return;
+            }
+            const numeric = /^\d+$/.test(query) ? Number(query) : null;
+            let chosen = pool.find(p => p.barcode && p.barcode === query);
+            if (!chosen && numeric !== null) {
+                chosen = pool.find(p => p.number === numeric) || null;
+            }
+            if (!chosen) chosen = pool[0];
+            await addProduct(chosen);
+            if (isBarcode) playBeep(true);
+            input.value = '';
+            lastQuery = '';
+            hideSuggestions();
+        } catch (e) {
+            feedback.innerHTML = `<i class=\"bi bi-exclamation-octagon text-danger me-1\"></i>${e.message || 'Unable to add product'}`;
+        }
+    }
+
+    function scheduleScanFinish() {
+        const v = (input.value || '').trim();
+        if (!/^\d{6,}$/.test(v)) return;
+        if (scanIdleTimer) clearTimeout(scanIdleTimer);
+        scanIdleTimer = setTimeout(async () => {
+            const now = Date.now();
+            if (lastScanSubmit.value === v && now < lastScanSubmit.until) return; // duplicate guard
+            lastScanSubmit = { value: v, until: now + SCAN.DUP_MS };
+            await quickPickAndAddSearch(v);
+        }, SCAN.IDLE_MS);
     }
 
     // Fetch monthly sales for a product (async, non-blocking)
@@ -597,9 +644,25 @@
         const value = input.value.trim();
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => fetchSuggestions(value), 250);
+        scheduleScanFinish();
     });
 
+    input.addEventListener('paste', () => { setTimeout(scheduleScanFinish, 0); });
+
     input.addEventListener('keydown', async (event) => {
+        // Some scanners send Tab instead of Enter — treat Tab as submit for numeric barcodes
+        if (event.key === 'Tab') {
+            const v = input.value.trim();
+            if (/^\d{6,}$/.test(v)) {
+                event.preventDefault();
+                const now = Date.now();
+                if (!(lastScanSubmit.value === v && now < lastScanSubmit.until)) {
+                    lastScanSubmit = { value: v, until: now + SCAN.DUP_MS };
+                    await quickPickAndAddSearch(v);
+                }
+                return;
+            }
+        }
         if (suggestionsData.length === 0) {
             if (event.key === 'Enter') {
                 // Fallback for fast barcode scans: do a quick lookup and add

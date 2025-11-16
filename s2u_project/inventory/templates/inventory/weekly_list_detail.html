@@ -1108,10 +1108,35 @@
         await addProduct(product.number);
     });
 
+    // Auto-finish scans that don't send Enter (idle-gap detection)
+    const SCAN = { MIN_LEN: 6, IDLE_MS: 120, DUP_MS: 350 };
+    let scanIdleTimer = null;
+    let lastScanSubmit = { value: '', until: 0 };
+
+    function scheduleScanFinish() {
+        if (!canEdit) return;
+        const v = (queryInput.value || '').trim();
+        // Heuristic: numeric barcodes only (6+ digits)
+        if (!/^\d{6,}$/.test(v)) return;
+        if (scanIdleTimer) clearTimeout(scanIdleTimer);
+        scanIdleTimer = setTimeout(async () => {
+            const now = Date.now();
+            if (lastScanSubmit.value === v && now < lastScanSubmit.until) return; // duplicate guard
+            lastScanSubmit = { value: v, until: now + SCAN.DUP_MS };
+            await quickPickAndAdd(v);
+        }, SCAN.IDLE_MS);
+    }
+
     if (canEdit) queryInput.addEventListener('input', () => {
         const value = queryInput.value.trim();
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => fetchSuggestions(value), 220);
+        scheduleScanFinish();
+    });
+
+    // Pasted barcodes should also auto-finish
+    if (canEdit) queryInput.addEventListener('paste', () => {
+        setTimeout(scheduleScanFinish, 0);
     });
 
     if (canEdit) queryInput.addEventListener('keydown', async (event) => {
@@ -1130,6 +1155,19 @@
             event.preventDefault();
             highlightSuggestion((highlighted - 1 + suggestions.length) % suggestions.length);
             return;
+        }
+        // Many scanners send Tab instead of Enter — handle it too
+        if (event.key === 'Tab') {
+            const v = queryInput.value.trim();
+            if (/^\d{6,}$/.test(v)) {
+                event.preventDefault();
+                const now = Date.now();
+                if (!(lastScanSubmit.value === v && now < lastScanSubmit.until)) {
+                    lastScanSubmit = { value: v, until: now + SCAN.DUP_MS };
+                    await quickPickAndAdd(v);
+                }
+                return;
+            }
         }
         if (event.key === 'Enter') {
             event.preventDefault();
