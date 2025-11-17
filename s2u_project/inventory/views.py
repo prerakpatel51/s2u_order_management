@@ -2526,7 +2526,7 @@ def weekly_export_custom(request, list_id):
             transfer_from__isnull=False,
             transfer_bottles__gt=0
         ).order_by("product__name")
-        columns = ["Product Name", "Barcode", "Supplier", "Transfer From", "Transfer Bottles"]
+        columns = ["Product #", "Product Name", "Transfer From", "Transfer Bottles"]
     else:
         # Joe/BT/SQW: respective field > 0
         filter_kwargs = {f"{export_type}__gt": 0}
@@ -2581,9 +2581,8 @@ def _export_custom_excel(request, order_list, items, export_type, columns):
     for item in items:
         if export_type == 'transfer':
             row_data = [
+                item.product.number,
                 item.product.name,
-                item.product.barcode or '',
-                item.product.supplier_name or '',
                 f"{item.transfer_from.name} (#{item.transfer_from.number})" if item.transfer_from else '',
                 item.transfer_bottles or 0
             ]
@@ -2651,7 +2650,10 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
 
     # Title
     user_name = getattr(request.user, "get_full_name", lambda: "")() or getattr(request.user, "username", "")
-    title_text = f"{export_type.upper()} Export - {order_list.store.name} (#{order_list.store.number})"
+    if export_type == "transfer":
+        title_text = f"Transfer List - {order_list.store.name} (#{order_list.store.number})"
+    else:
+        title_text = f"{export_type.upper()} Export - {order_list.store.name} (#{order_list.store.number})"
     subtitle_text = f"Week of {order_list.target_date} • Generated on {dj_tz.now().astimezone().strftime('%Y-%m-%d %H:%M')} by {user_name}"
 
     title_style = ParagraphStyle(name='CustomTitle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#2563EB'))
@@ -2665,9 +2667,8 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
     for item in items:
         if export_type == 'transfer':
             row_data = [
+                str(item.product.number),
                 item.product.name[:40],
-                item.product.barcode or '',
-                item.product.supplier_name[:20] if item.product.supplier_name else '',
                 f"{item.transfer_from.name} (#{item.transfer_from.number})" if item.transfer_from else '',
                 str(item.transfer_bottles or 0)
             ]
@@ -2700,11 +2701,46 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
 
     buffer.seek(0)
     response = HttpResponse(buffer.read(), content_type='application/pdf')
-    filename = f"{export_type}_export_{order_list.store.number}_{order_list.target_date}.pdf"
+    if export_type == "transfer":
+        filename = f"transfer_list_{order_list.store.number}_{order_list.target_date}.pdf"
+    else:
+        filename = f"{export_type}_export_{order_list.store.number}_{order_list.target_date}.pdf"
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
     logger.info(f"[EXPORT] PDF generated successfully: {filename}")
     return response
+
+
+@login_required
+def weekly_transfer_print(request, list_id):
+    """Print-friendly HTML view of transfer items for a weekly list.
+
+    Shows only items with a transfer_from selected and transfer_bottles > 0.
+    """
+    from django.shortcuts import get_object_or_404
+    from .models import WeeklyOrderList
+
+    order_list = get_object_or_404(WeeklyOrderList, pk=list_id)
+
+    # For non-admins, require finalized list before exposing transfer details
+    if not request.user.is_staff and not order_list.finalized_at:
+        return JsonResponse({"error": "Transfer list is only available after finalization."}, status=403)
+
+    items = (
+        order_list.items.select_related("product", "transfer_from")
+        .filter(transfer_from__isnull=False, transfer_bottles__gt=0)
+        .order_by("product__name")
+    )
+
+    return render(
+        request,
+        "inventory/weekly_transfer_print.html",
+        {
+            "order_list": order_list,
+            "items": items,
+            "active_tab": "weekly",
+        },
+    )
 
 @login_required
 @user_passes_test(_staff_required)

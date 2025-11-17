@@ -184,6 +184,14 @@
                             <button type="button" class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#exportModal" data-export-type="transfer">
                                 <i class="bi bi-download me-1"></i>Export Transfer
                             </button>
+                            {% if order_list.finalized_at %}
+                            <a class="btn btn-outline-secondary" href="{% url 'inventory:weekly_transfer_print' order_list.id %}" target="_blank">
+                                <i class="bi bi-printer me-1"></i>Print Transfer List
+                            </a>
+                            <a class="btn btn-outline-danger" href="{% url 'inventory:weekly_export_custom' order_list.id %}?type=transfer&format=pdf" target="_blank">
+                                <i class="bi bi-file-earmark-pdf me-1"></i>PDF Transfer List
+                            </a>
+                            {% endif %}
                             {% endif %}
                             {% if not order_list.finalized_at %}
                             <button type="button" id="refresh-all" class="btn btn-outline-success">

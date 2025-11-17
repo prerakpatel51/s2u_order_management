@@ -33,6 +33,7 @@ urlpatterns = [
     path("weekly/<int:list_id>/export/excel/custom/", views.weekly_export_excel_custom, name="weekly_export_excel_custom"),
     path("weekly/<int:list_id>/export/pdf/custom/", views.weekly_export_pdf_custom, name="weekly_export_pdf_custom"),
     path("weekly/<int:list_id>/export/custom/", views.weekly_export_custom, name="weekly_export_custom"),
+    path("weekly/<int:list_id>/transfer/print/", views.weekly_transfer_print, name="weekly_transfer_print"),
     # Per-item async refresh (stock + monthly)
     path("weekly/<int:list_id>/item/<int:product_number>/refresh/start/", views.weekly_item_refresh_start, name="weekly_item_refresh_start"),
     path("api/weekly/item/refresh/status/", views.weekly_item_refresh_status, name="weekly_item_refresh_status"),
