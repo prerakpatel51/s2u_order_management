@@ -368,6 +368,10 @@
                         <div class="ratio ratio-16x9 border rounded bg-dark">
                             <video id="scan-video" class="w-100 h-100" autoplay muted playsinline></video>
                         </div>
+                        <div class="mt-3 d-none" id="scan-zoom-wrapper">
+                            <label for="scan-zoom-range" class="form-label small mb-1">Zoom</label>
+                            <input type="range" class="form-range" id="scan-zoom-range" min="1" max="2" step="0.1" value="1">
+                        </div>
                         <p class="small text-muted mt-2 mb-0">
                             Point the camera at a product barcode. When a match is found, you can enter the on-shelf count before adding to the list.
                         </p>
@@ -1286,6 +1290,8 @@
     const scanVideo = document.getElementById('scan-video');
     const scanUnsupported = document.getElementById('scan-unsupported');
     const scanStopBtn = document.getElementById('scan-stop');
+    const scanZoomWrapper = document.getElementById('scan-zoom-wrapper');
+    const scanZoomRange = document.getElementById('scan-zoom-range');
     const onShelfModalEl = document.getElementById('onShelfModal');
     const onShelfInput = document.getElementById('on-shelf-input');
     const onShelfProductEl = document.getElementById('on-shelf-product-name');
@@ -1293,6 +1299,7 @@
 
     let scanDetector = null;
     let scanStream = null;
+    let scanTrack = null;
     let scanActive = false;
     let currentOnShelfProduct = null;
     let lastScanValue = '';
@@ -1345,8 +1352,53 @@
                 video: { facingMode: { ideal: 'environment' } },
                 audio: false
             });
+            scanTrack = (scanStream.getVideoTracks && scanStream.getVideoTracks()[0]) || null;
             scanVideo.srcObject = scanStream;
             await scanVideo.play();
+
+            // Init zoom slider (hardware zoom if supported; otherwise CSS zoom)
+            if (scanZoomWrapper && scanZoomRange) {
+                scanZoomWrapper.classList.remove('d-none');
+                scanZoomRange.oninput = null;
+                let handledByTrack = false;
+                if (scanTrack && typeof scanTrack.getCapabilities === 'function') {
+                    try {
+                        const caps = scanTrack.getCapabilities();
+                        const settings = (typeof scanTrack.getSettings === 'function') ? scanTrack.getSettings() : {};
+                        if (caps && 'zoom' in caps) {
+                            const min = caps.zoom.min ?? 1;
+                            const max = caps.zoom.max ?? Math.max(min, 2);
+                            const step = caps.zoom.step || (max - min) / 20 || 0.1;
+                            const initial = settings.zoom ?? (min + (max - min) / 2);
+                            scanZoomRange.min = String(min);
+                            scanZoomRange.max = String(max);
+                            scanZoomRange.step = String(step);
+                            scanZoomRange.value = String(initial);
+                            scanZoomRange.oninput = async () => {
+                                const v = Number(scanZoomRange.value);
+                                try {
+                                    await scanTrack.applyConstraints({ advanced: [{ zoom: v }] });
+                                } catch (_) { /* ignore zoom failures */ }
+                            };
+                            handledByTrack = true;
+                        }
+                    } catch (_) { /* fall back to CSS zoom */ }
+                }
+                if (!handledByTrack) {
+                    // CSS zoom fallback: visually scale the video
+                    scanZoomRange.min = '1';
+                    scanZoomRange.max = '2';
+                    scanZoomRange.step = '0.1';
+                    scanZoomRange.value = '1';
+                    scanVideo.style.transformOrigin = 'center center';
+                    scanVideo.style.objectFit = 'cover';
+                    scanZoomRange.oninput = () => {
+                        const v = Number(scanZoomRange.value) || 1;
+                        scanVideo.style.transform = `scale(${v})`;
+                    };
+                }
+            }
+
             scanActive = true;
             window.requestAnimationFrame(scanLoop);
         } catch (err) {
@@ -1365,10 +1417,17 @@
             } catch (_) {}
             scanStream = null;
         }
+        scanTrack = null;
         if (scanVideo) {
             try {
                 scanVideo.srcObject = null;
             } catch (_) {}
+            // Reset CSS zoom fallback
+            scanVideo.style.transform = '';
+        }
+        if (scanZoomWrapper && scanZoomRange) {
+            scanZoomWrapper.classList.add('d-none');
+            scanZoomRange.oninput = null;
         }
     }
 
