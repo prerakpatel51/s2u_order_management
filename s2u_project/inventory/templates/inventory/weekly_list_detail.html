@@ -139,6 +139,18 @@
         background: transparent !important;
     }
 
+    /* On very small screens, disable sticky columns to prevent visual overlap and let the table scroll normally */
+    @media (max-width: 576px) {
+        #weekly-items-table thead tr:last-child th,
+        #weekly-items-table tbody th,
+        #weekly-items-table tbody td {
+            position: static !important;
+            left: auto !important;
+            right: auto !important;
+            box-shadow: none !important;
+        }
+    }
+
     @media (max-width: 992px) {
         .quantity-input { max-width: 180px; }
     }
@@ -221,7 +233,7 @@
                                 <input class="form-check-input" type="checkbox" id="toggle-hide-barcode">
                                 <label class="form-check-label small" for="toggle-hide-barcode">Hide # &amp; Barcode</label>
                             </div>
-                            {% if is_admin %}
+                            {% if show_admin_cols %}
                             <div class="form-check form-switch ms-2">
                                 <input class="form-check-input" type="checkbox" id="toggle-hide-others">
                                 <label class="form-check-label small" for="toggle-hide-others">Hide Other Stores</label>
@@ -1420,6 +1432,11 @@
 
     function openOnShelfPrompt(product) {
         if (!onShelfModalEl || !onShelfInput || !onShelfProductEl) return;
+        // Hide the scan modal while we collect on-shelf input to avoid stacked modals on mobile
+        if (scanModalEl) {
+            const scanModal = bootstrap.Modal.getInstance(scanModalEl);
+            if (scanModal) scanModal.hide();
+        }
         currentOnShelfProduct = product;
         onShelfProductEl.textContent = `${product.number} · ${product.name}`;
         const existing = items.get(Number(product.number));
@@ -1462,12 +1479,10 @@
         } finally {
             const m = bootstrap.Modal.getInstance(onShelfModalEl);
             if (m) m.hide();
-            // If the scan modal is still open and camera is running, resume scanning
-            if (scanModalEl && scanModalEl.classList.contains('show') && scanStream && scanDetector) {
-                if (!scanActive) {
-                    scanActive = true;
-                    window.requestAnimationFrame(scanLoop);
-                }
+            // After saving, reopen the camera scan modal so the user can keep scanning
+            if (scanModalEl && canEdit) {
+                const scanModal = bootstrap.Modal.getOrCreateInstance(scanModalEl);
+                scanModal.show();
             }
         }
     }
@@ -1484,17 +1499,7 @@
         });
     }
 
-    if (onShelfModalEl && canEdit) {
-        onShelfModalEl.addEventListener('hidden.bs.modal', () => {
-            // If user cancels the prompt but scan modal is still visible, resume scanning
-            if (scanModalEl && scanModalEl.classList.contains('show') && scanStream && scanDetector) {
-                if (!scanActive) {
-                    scanActive = true;
-                    window.requestAnimationFrame(scanLoop);
-                }
-            }
-        });
-    }
+    // If user cancels the on-shelf modal, they can manually close the camera scan
 
     if (canEdit) tableBody.addEventListener('click', async (event) => {
         const row = event.target.closest('tr');
