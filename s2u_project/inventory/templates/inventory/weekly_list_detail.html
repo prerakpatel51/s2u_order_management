@@ -242,6 +242,11 @@
                                     <div class="list-group shadow" id="weekly-suggestion-list"></div>
                                 </div>
                             </div>
+                            <div class="mt-2">
+                                <button type="button" id="camera-scan-btn" class="btn btn-outline-primary btn-sm">
+                                    <i class="bi bi-camera-video me-1"></i>Camera Scan
+                                </button>
+                            </div>
                             <div class="form-text">Scan a barcode repeatedly to increase the on-shelf count automatically.</div>
                         </div>
                     {% else %}
@@ -330,6 +335,59 @@
                             <button type="submit" class="btn btn-danger"><i class="bi bi-file-earmark-pdf me-1"></i>Export PDF</button>
                         </form>
                         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Camera Scan modal -->
+        <div class="modal fade" id="scanModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-camera-video me-2"></i>Camera Scan</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="scan-unsupported" class="alert alert-warning d-none">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            Camera barcode scanning is not supported on this device or browser.
+                        </div>
+                        <div class="ratio ratio-16x9 border rounded bg-dark">
+                            <video id="scan-video" class="w-100 h-100" autoplay muted playsinline></video>
+                        </div>
+                        <p class="small text-muted mt-2 mb-0">
+                            Point the camera at a product barcode. When a match is found, you can enter the on-shelf count before adding to the list.
+                        </p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" id="scan-stop" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                            <i class="bi bi-stop-circle me-1"></i>Stop
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- On-shelf quantity modal -->
+        <div class="modal fade" id="onShelfModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-hash me-2"></i>On Shelf Count</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-2 small text-muted" id="on-shelf-product-name"></div>
+                        <label for="on-shelf-input" class="form-label">On shelf</label>
+                        <input type="number" min="0" step="1" id="on-shelf-input" class="form-control form-control-lg" inputmode="numeric" placeholder="Enter on-shelf quantity">
+                        <div class="form-text">Use the total bottles currently on the shelf.</div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" id="on-shelf-save" class="btn btn-primary">
+                            <i class="bi bi-check2-circle me-1"></i>Add to List
+                        </button>
                     </div>
                 </div>
             </div>
@@ -1209,6 +1267,234 @@
             hideSuggestions();
         }
     });
+
+    // ---- Camera Scan (phone / browser camera) ----
+    const cameraScanBtn = document.getElementById('camera-scan-btn');
+    const scanModalEl = document.getElementById('scanModal');
+    const scanVideo = document.getElementById('scan-video');
+    const scanUnsupported = document.getElementById('scan-unsupported');
+    const scanStopBtn = document.getElementById('scan-stop');
+    const onShelfModalEl = document.getElementById('onShelfModal');
+    const onShelfInput = document.getElementById('on-shelf-input');
+    const onShelfProductEl = document.getElementById('on-shelf-product-name');
+    const onShelfSaveBtn = document.getElementById('on-shelf-save');
+
+    let scanDetector = null;
+    let scanStream = null;
+    let scanActive = false;
+    let currentOnShelfProduct = null;
+    let lastScanValue = '';
+    let lastScanAt = 0;
+
+    // Initialize BarcodeDetector if supported
+    if (cameraScanBtn && canEdit) {
+        if ('BarcodeDetector' in window && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            try {
+                scanDetector = new BarcodeDetector({
+                    formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39']
+                });
+            } catch (e) {
+                scanDetector = null;
+            }
+        }
+
+        if (!scanDetector) {
+            // Graceful fallback: disable camera scan if unsupported
+            cameraScanBtn.disabled = true;
+            cameraScanBtn.title = 'Camera barcode scanning is not supported on this device or browser.';
+        } else if (scanModalEl) {
+            const scanModal = new bootstrap.Modal(scanModalEl);
+            cameraScanBtn.addEventListener('click', () => {
+                scanModal.show();
+            });
+            scanModalEl.addEventListener('shown.bs.modal', () => {
+                startCameraScan();
+            });
+            scanModalEl.addEventListener('hidden.bs.modal', () => {
+                stopCameraScan();
+            });
+            if (scanStopBtn) {
+                scanStopBtn.addEventListener('click', () => {
+                    scanModal.hide();
+                });
+            }
+        }
+    }
+
+    async function startCameraScan() {
+        if (!scanDetector || !scanVideo) return;
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            if (scanUnsupported) scanUnsupported.classList.remove('d-none');
+            return;
+        }
+        try {
+            if (scanUnsupported) scanUnsupported.classList.add('d-none');
+            scanStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: 'environment' } },
+                audio: false
+            });
+            scanVideo.srcObject = scanStream;
+            await scanVideo.play();
+            scanActive = true;
+            window.requestAnimationFrame(scanLoop);
+        } catch (err) {
+            if (scanUnsupported) {
+                scanUnsupported.textContent = 'Unable to access camera: ' + (err.message || 'permission denied');
+                scanUnsupported.classList.remove('d-none');
+            }
+        }
+    }
+
+    function stopCameraScan() {
+        scanActive = false;
+        if (scanStream) {
+            try {
+                scanStream.getTracks().forEach((t) => t.stop());
+            } catch (_) {}
+            scanStream = null;
+        }
+        if (scanVideo) {
+            try {
+                scanVideo.srcObject = null;
+            } catch (_) {}
+        }
+    }
+
+    async function scanLoop() {
+        if (!scanActive || !scanDetector || !scanVideo || scanVideo.readyState < 2) {
+            if (scanActive) window.requestAnimationFrame(scanLoop);
+            return;
+        }
+        try {
+            const barcodes = await scanDetector.detect(scanVideo);
+            if (Array.isArray(barcodes) && barcodes.length > 0) {
+                const raw = (barcodes[0].rawValue || '').trim();
+                if (raw) {
+                    const now = Date.now();
+                    // Simple cooldown so the same code isn't re-triggered immediately
+                    if (raw === lastScanValue && now - lastScanAt < 1500) {
+                        if (scanActive) window.requestAnimationFrame(scanLoop);
+                        return;
+                    }
+                    lastScanValue = raw;
+                    lastScanAt = now;
+                    scanActive = false;
+                    await handleScannedBarcode(raw);
+                    // Do not close the scan modal or stop camera; user will keep scanning
+                    return;
+                }
+            }
+        } catch (_) {
+            // ignore detection errors, keep scanning
+        }
+        if (scanActive) window.requestAnimationFrame(scanLoop);
+    }
+
+    async function handleScannedBarcode(raw) {
+        const query = (raw || '').trim();
+        if (!query) return;
+        try {
+            const resp = await fetch(`{% url 'inventory:weekly_search' order_list.id %}?q=${encodeURIComponent(query)}`);
+            if (!resp.ok) throw new Error('Search failed');
+            const data = await resp.json();
+            const pool = [...(data.matches || []), ...(data.suggestions || [])];
+            if (pool.length === 0) {
+                showFeedback('info', `<i class="bi bi-exclamation-triangle me-2"></i>No products found matching “${escapeAttr(query)}”.`);
+                return;
+            }
+            const isNumeric = /^\d+$/.test(query);
+            let chosen = pool.find(p => p.barcode && p.barcode === query) || null;
+            if (!chosen) {
+                chosen = pool.find(p => Array.isArray(p.barcodes) && p.barcodes.includes(query)) || null;
+            }
+            if (!chosen && isNumeric) {
+                const num = Number(query);
+                chosen = pool.find(p => p.number === num) || null;
+            }
+            if (!chosen) chosen = pool[0];
+            openOnShelfPrompt(chosen);
+        } catch (e) {
+            showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${e.message || 'Unable to search product'}`);
+        }
+    }
+
+    function openOnShelfPrompt(product) {
+        if (!onShelfModalEl || !onShelfInput || !onShelfProductEl) return;
+        currentOnShelfProduct = product;
+        onShelfProductEl.textContent = `${product.number} · ${product.name}`;
+        const existing = items.get(Number(product.number));
+        onShelfInput.value = existing && existing.on_shelf != null ? String(existing.on_shelf) : '';
+        const m = bootstrap.Modal.getOrCreateInstance(onShelfModalEl);
+        m.show();
+        setTimeout(() => {
+            try {
+                onShelfInput.focus();
+                onShelfInput.select();
+            } catch (_) {}
+        }, 150);
+    }
+
+    async function saveOnShelfFromModal() {
+        if (!currentOnShelfProduct || !onShelfInput) return;
+        const raw = (onShelfInput.value || '').trim();
+        if (raw === '') {
+            const m = bootstrap.Modal.getInstance(onShelfModalEl);
+            if (m) m.hide();
+            return;
+        }
+        const qty = Number(raw);
+        if (!Number.isFinite(qty) || qty < 0) {
+            showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>Please enter a non-negative number.`);
+            return;
+        }
+        const productNumber = currentOnShelfProduct.number;
+        const existing = items.get(Number(productNumber));
+        try {
+            if (existing) {
+                await patchItem(productNumber, { on_shelf: qty });
+            } else {
+                await addProduct(productNumber);
+                await patchItem(productNumber, { on_shelf: qty });
+            }
+            showFeedback('success', `<i class="bi bi-check-circle me-2"></i>Updated on-shelf for “${escapeAttr(currentOnShelfProduct.name)}”.`);
+        } catch (_) {
+            // addProduct/patchItem already show feedback on failure
+        } finally {
+            const m = bootstrap.Modal.getInstance(onShelfModalEl);
+            if (m) m.hide();
+            // If the scan modal is still open and camera is running, resume scanning
+            if (scanModalEl && scanModalEl.classList.contains('show') && scanStream && scanDetector) {
+                if (!scanActive) {
+                    scanActive = true;
+                    window.requestAnimationFrame(scanLoop);
+                }
+            }
+        }
+    }
+
+    if (onShelfSaveBtn && canEdit) {
+        onShelfSaveBtn.addEventListener('click', saveOnShelfFromModal);
+    }
+    if (onShelfInput && canEdit) {
+        onShelfInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                saveOnShelfFromModal();
+            }
+        });
+    }
+
+    if (onShelfModalEl && canEdit) {
+        onShelfModalEl.addEventListener('hidden.bs.modal', () => {
+            // If user cancels the prompt but scan modal is still visible, resume scanning
+            if (scanModalEl && scanModalEl.classList.contains('show') && scanStream && scanDetector) {
+                if (!scanActive) {
+                    scanActive = true;
+                    window.requestAnimationFrame(scanLoop);
+                }
+            }
+        });
+    }
 
     if (canEdit) tableBody.addEventListener('click', async (event) => {
         const row = event.target.closest('tr');
