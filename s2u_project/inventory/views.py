@@ -560,7 +560,8 @@ def product_search_api(request):
         return JsonResponse({"matches": [], "suggestions": [], "page": 1, "page_size": page_size, "has_next": False})
 
     # Tiny Redis cache to accelerate repeated queries during typing
-    cache_key = f"search:v1:{_normalize(query)}:{page}:{min(max(page_size,1),50)}"
+    # v2 payload includes all known barcodes for each product
+    cache_key = f"search:v2:{_normalize(query)}:{page}:{min(max(page_size,1),50)}"
     try:
         cached = redis_get_json(cache_key)
     except Exception:
@@ -577,11 +578,31 @@ def product_search_api(request):
         except (Store.DoesNotExist, ValueError):
             store = Store.objects.filter(number=str(store_id)).first()
 
+    # Build combined barcodes (primary + extras) in one query for this page
+    extra_map: dict[int, list[str]] = {}
+    try:
+        ids = [p.pk for p in matches]
+        if ids:
+            for pid, code in ProductBarcode.objects.filter(product_id__in=ids).values_list("product_id", "code"):
+                if not code:
+                    continue
+                extra_map.setdefault(int(pid), []).append(str(code))
+    except Exception:
+        extra_map = {}
+
     def serialize(product: Product) -> dict:
+        extras = extra_map.get(product.pk) or []
+        barcodes: list[str] = []
+        if product.barcode:
+            barcodes.append(product.barcode)
+        for code in extras:
+            if code and code not in barcodes:
+                barcodes.append(code)
         return {
             "number": product.number,
             "name": product.name,
             "barcode": product.barcode,
+            "barcodes": barcodes,
             "supplier_name": product.supplier_name,
         }
 
@@ -1548,11 +1569,32 @@ def weekly_search_api(request, list_id):
 
     matches, suggestions = _search_products(query)
 
+    # Build combined barcodes for all candidates (primary + extras)
+    products_all: List[Product] = list(matches) + list(suggestions)
+    extra_map: dict[int, list[str]] = {}
+    try:
+        ids = [p.pk for p in products_all]
+        if ids:
+            for pid, code in ProductBarcode.objects.filter(product_id__in=ids).values_list("product_id", "code"):
+                if not code:
+                    continue
+                extra_map.setdefault(int(pid), []).append(str(code))
+    except Exception:
+        extra_map = {}
+
     def serialize(product: Product) -> dict:
+        extras = extra_map.get(product.pk) or []
+        barcodes: list[str] = []
+        if product.barcode:
+            barcodes.append(product.barcode)
+        for code in extras:
+            if code and code not in barcodes:
+                barcodes.append(code)
         return {
             "number": product.number,
             "name": product.name,
             "barcode": product.barcode,
+            "barcodes": barcodes,
             "supplier_name": product.supplier_name,
         }
 

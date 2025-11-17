@@ -225,6 +225,11 @@
             }
             const numeric = /^\d+$/.test(query) ? Number(query) : null;
             let chosen = pool.find(p => p.barcode && p.barcode === query);
+            if (!chosen) {
+                chosen = pool.find(p =>
+                    Array.isArray(p.barcodes) && p.barcodes.includes(query)
+                ) || null;
+            }
             if (!chosen && numeric !== null) {
                 chosen = pool.find(p => p.number === numeric) || null;
             }
@@ -686,6 +691,11 @@
                     }
                     const numeric = /^\d+$/.test(raw) ? Number(raw) : null;
                     let chosen = pool.find(p => p.barcode && p.barcode === raw);
+                    if (!chosen) {
+                        chosen = pool.find(p =>
+                            Array.isArray(p.barcodes) && p.barcodes.includes(raw)
+                        ) || null;
+                    }
                     if (!chosen && numeric !== null) {
                         chosen = pool.find(p => p.number === numeric) || null;
                     }

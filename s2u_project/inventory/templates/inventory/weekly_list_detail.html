@@ -809,9 +809,14 @@
                 if (isBarcode) playBeep(false);
                 return;
             }
-            // Prefer exact barcode or number match when available
+            // Prefer exact barcode or number match when available (including additional barcodes)
             const numeric = /^\d+$/.test(query) ? Number(query) : null;
             let chosen = pool.find(p => p.barcode && p.barcode === query);
+            if (!chosen) {
+                chosen = pool.find(p =>
+                    Array.isArray(p.barcodes) && p.barcodes.includes(query)
+                ) || null;
+            }
             if (!chosen && numeric !== null) {
                 chosen = pool.find(p => p.number === numeric) || null;
             }
