@@ -2493,10 +2493,7 @@ def weekly_export_pdf_custom(request, list_id):
     return response
 
 
-# ===== Admin-only: finalize and delete lists =====
-
 @login_required
-@user_passes_test(lambda u: u.is_staff)
 def weekly_export_custom(request, list_id):
     """
     Custom export for Joe/BT/SQW/Transfer with filtered rows.
@@ -2518,6 +2515,14 @@ def weekly_export_custom(request, list_id):
         return JsonResponse({"error": "Invalid export type"}, status=400)
 
     order_list = get_object_or_404(WeeklyOrderList, pk=list_id)
+
+    is_admin = bool(request.user.is_staff)
+    # Employees can only export transfer lists, and only after finalization
+    if not is_admin:
+        if export_type != "transfer":
+            return JsonResponse({"error": "Only administrators can export this data."}, status=403)
+        if not order_list.finalized_at:
+            return JsonResponse({"error": "Transfer list export is only available after finalization."}, status=403)
 
     # Filter items based on export type
     if export_type == 'transfer':
