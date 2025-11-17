@@ -1118,8 +1118,9 @@
     function scheduleScanFinish() {
         if (!canEdit) return;
         const v = (queryInput.value || '').trim();
-        // Heuristic: any non-whitespace 6+ chars (covers alphanumeric barcodes)
-        if (!/^\S{6,}$/.test(v)) return;
+        // Heuristic: treat as a scan only if it looks like a numeric barcode (6+ digits).
+        // This avoids auto-adding while typing regular product names.
+        if (!/^\d{6,}$/.test(v)) return;
         if (scanIdleTimer) clearTimeout(scanIdleTimer);
         scanIdleTimer = setTimeout(async () => {
             const now = Date.now();
@@ -1161,7 +1162,8 @@
         // Many scanners send Tab instead of Enter — handle it too
         if (event.key === 'Tab') {
             const v = queryInput.value.trim();
-            if (/^\S{6,}$/.test(v)) {
+            // Only auto-submit Tab when the value looks like a pure numeric barcode.
+            if (/^\d{6,}$/.test(v)) {
                 event.preventDefault();
                 const now = Date.now();
                 if (!(lastScanSubmit.value === v && now < lastScanSubmit.until)) {

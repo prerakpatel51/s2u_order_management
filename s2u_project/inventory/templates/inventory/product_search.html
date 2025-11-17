@@ -242,7 +242,9 @@
 
     function scheduleScanFinish() {
         const v = (input.value || '').trim();
-        if (!/^\S{6,}$/.test(v)) return;
+        // Treat as a scan only if it looks like a numeric barcode.
+        // This prevents regular typed names (e.g. "buffalotrace") from auto-adding.
+        if (!/^\d{6,}$/.test(v)) return;
         if (scanIdleTimer) clearTimeout(scanIdleTimer);
         scanIdleTimer = setTimeout(async () => {
             const now = Date.now();
@@ -654,7 +656,8 @@
         // Some scanners send Tab instead of Enter — treat Tab as submit for numeric barcodes
         if (event.key === 'Tab') {
             const v = input.value.trim();
-            if (/^\S{6,}$/.test(v)) {
+            // Only auto-submit Tab when the value looks like a pure numeric barcode.
+            if (/^\d{6,}$/.test(v)) {
                 event.preventDefault();
                 const now = Date.now();
                 if (!(lastScanSubmit.value === v && now < lastScanSubmit.until)) {
