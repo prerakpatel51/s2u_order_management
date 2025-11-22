@@ -1307,7 +1307,8 @@
 
     // Initialize BarcodeDetector if supported
     if (cameraScanBtn && canEdit) {
-        if ('BarcodeDetector' in window && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const hasMedia = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+        if ('BarcodeDetector' in window && hasMedia) {
             try {
                 scanDetector = new BarcodeDetector({
                     formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39']
@@ -1317,11 +1318,8 @@
             }
         }
 
-        if (!scanDetector) {
-            // Graceful fallback: disable camera scan if unsupported
-            cameraScanBtn.disabled = true;
-            cameraScanBtn.title = 'Camera barcode scanning is not supported on this device or browser.';
-        } else if (scanModalEl) {
+        // Allow the modal/camera even if BarcodeDetector is missing so the permission prompt still shows
+        if (hasMedia && scanModalEl) {
             const scanModal = new bootstrap.Modal(scanModalEl);
             cameraScanBtn.addEventListener('click', () => {
                 scanModal.show();
@@ -1337,11 +1335,15 @@
                     scanModal.hide();
                 });
             }
+            });
+        } else if (!hasMedia) {
+            cameraScanBtn.disabled = true;
+            cameraScanBtn.title = 'Camera access is not supported on this device or browser.';
         }
     }
 
     async function startCameraScan() {
-        if (!scanDetector || !scanVideo) return;
+        if (!scanVideo) return;
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             if (scanUnsupported) scanUnsupported.classList.remove('d-none');
             return;
@@ -1399,8 +1401,16 @@
                 }
             }
 
+            // If BarcodeDetector is unavailable, keep showing video and notify the user
+            if (!scanDetector && scanUnsupported) {
+                scanUnsupported.textContent = 'Barcode detection is not supported in this browser, but the camera is active.';
+                scanUnsupported.classList.remove('d-none');
+            }
+
             scanActive = true;
-            window.requestAnimationFrame(scanLoop);
+            if (scanDetector) {
+                window.requestAnimationFrame(scanLoop);
+            }
         } catch (err) {
             if (scanUnsupported) {
                 scanUnsupported.textContent = 'Unable to access camera: ' + (err.message || 'permission denied');
