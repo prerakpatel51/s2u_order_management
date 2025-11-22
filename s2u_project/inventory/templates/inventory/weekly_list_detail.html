@@ -1298,6 +1298,8 @@
     const onShelfSaveBtn = document.getElementById('on-shelf-save');
 
     let scanDetector = null;
+    let zxingReader = null;
+    let zxingActive = false;
     let scanStream = null;
     let scanTrack = null;
     let scanActive = false;
@@ -1348,6 +1350,69 @@
             if (scanUnsupported) scanUnsupported.classList.remove('d-none');
             return;
         }
+
+        // Branch: native BarcodeDetector vs ZXing fallback
+        if (scanDetector) {
+            await startBarcodeDetectorScan();
+        } else {
+            await startZxingScan();
+        }
+    }
+
+    async function ensureZxingLoaded() {
+        if (window.ZXing) return;
+        await new Promise((resolve, reject) => {
+            const existing = document.getElementById('zxing-lib');
+            if (existing) {
+                existing.addEventListener('load', resolve, { once: true });
+                existing.addEventListener('error', reject, { once: true });
+                return;
+            }
+            const s = document.createElement('script');
+            s.src = 'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
+            s.id = 'zxing-lib';
+            s.async = true;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+    }
+
+    async function startZxingScan() {
+        try {
+            if (scanUnsupported) {
+                scanUnsupported.textContent = 'Using fallback barcode decoder…';
+                scanUnsupported.classList.remove('d-none');
+            }
+            await ensureZxingLoaded();
+            if (!window.ZXing || !ZXing.BrowserMultiFormatReader) throw new Error('ZXing failed to load');
+            if (!zxingReader) {
+                zxingReader = new ZXing.BrowserMultiFormatReader();
+            }
+            zxingActive = true;
+            // Let ZXing handle getUserMedia & video hookup; it will prompt for permission
+            await zxingReader.decodeFromVideoDevice(null, scanVideo, (result, err) => {
+                if (!zxingActive) return;
+                if (result) {
+                    const raw = (result.getText && result.getText()) || '';
+                    if (raw) {
+                        const now = Date.now();
+                        if (raw === lastScanValue && now - lastScanAt < 1500) return;
+                        lastScanValue = raw;
+                        lastScanAt = now;
+                        handleScannedBarcode(raw);
+                    }
+                }
+            });
+        } catch (err) {
+            if (scanUnsupported) {
+                scanUnsupported.textContent = 'Unable to start fallback decoder: ' + (err.message || 'permission denied');
+                scanUnsupported.classList.remove('d-none');
+            }
+        }
+    }
+
+    async function startBarcodeDetectorScan() {
         try {
             if (scanUnsupported) scanUnsupported.classList.add('d-none');
             scanStream = await navigator.mediaDevices.getUserMedia({
@@ -1401,16 +1466,8 @@
                 }
             }
 
-            // If BarcodeDetector is unavailable, keep showing video and notify the user
-            if (!scanDetector && scanUnsupported) {
-                scanUnsupported.textContent = 'Barcode detection is not supported in this browser, but the camera is active.';
-                scanUnsupported.classList.remove('d-none');
-            }
-
             scanActive = true;
-            if (scanDetector) {
-                window.requestAnimationFrame(scanLoop);
-            }
+            window.requestAnimationFrame(scanLoop);
         } catch (err) {
             if (scanUnsupported) {
                 scanUnsupported.textContent = 'Unable to access camera: ' + (err.message || 'permission denied');
@@ -1435,6 +1492,10 @@
             // Reset CSS zoom fallback
             scanVideo.style.transform = '';
         }
+        if (zxingReader) {
+            try { zxingReader.reset(); } catch (_) {}
+        }
+        zxingActive = false;
         if (scanZoomWrapper && scanZoomRange) {
             scanZoomWrapper.classList.add('d-none');
             scanZoomRange.oninput = null;
