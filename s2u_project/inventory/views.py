@@ -2680,7 +2680,7 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
                 f"#{item.transfer_from.number}" if item.transfer_from else '',
                 str(item.transfer_bottles or 0)
             ]
-            store_numbers.append(item.transfer_from.number if item.transfer_from else "—")
+            store_numbers.append(str(item.transfer_from.number) if item.transfer_from else "—")
         else:
             row_data = [
                 item.product.name[:40],
@@ -2698,10 +2698,12 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('FONTSIZE', (0, 0), (-1, 0), 13),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 14),
         ('GRID', (0, 0), (-1, -1), 0.9, colors.HexColor('#d0d7de')),
-        ('FONTSIZE', (0, 1), (-1, -1), 11),
+        ('FONTSIZE', (0, 1), (-1, -1), 12),
+        ('TOPPADDING', (0, 1), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ]
 
@@ -2798,7 +2800,7 @@ def weekly_transfer_print(request, list_id):
     store_color_map: dict[str, str] = {}
     items: list = []
     for item in items_qs:
-        store_number = item.transfer_from.number if item.transfer_from else "—"
+        store_number = str(item.transfer_from.number) if item.transfer_from else "—"
         if store_number not in store_color_map:
             store_color_map[store_number] = palette[len(store_color_map) % len(palette)]
         # Attach a lightweight attribute for the template
