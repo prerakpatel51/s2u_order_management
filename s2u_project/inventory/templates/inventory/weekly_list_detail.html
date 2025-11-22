@@ -365,6 +365,7 @@
                             <i class="bi bi-exclamation-triangle me-1"></i>
                             Camera barcode scanning is not supported on this device or browser.
                         </div>
+                        <div id="scan-feedback" class="alert d-none mb-3"></div>
                         <div class="ratio ratio-16x9 border rounded bg-dark">
                             <video id="scan-video" class="w-100 h-100" autoplay muted playsinline></video>
                         </div>
@@ -1289,6 +1290,7 @@
     const scanModalEl = document.getElementById('scanModal');
     const scanVideo = document.getElementById('scan-video');
     const scanUnsupported = document.getElementById('scan-unsupported');
+    const scanFeedback = document.getElementById('scan-feedback');
     const scanStopBtn = document.getElementById('scan-stop');
     const scanZoomWrapper = document.getElementById('scan-zoom-wrapper');
     const scanZoomRange = document.getElementById('scan-zoom-range');
@@ -1330,6 +1332,8 @@
                 });
             });
             scanModalEl.addEventListener('shown.bs.modal', () => {
+                // Clear any previous feedback messages
+                if (scanFeedback) scanFeedback.classList.add('d-none');
                 startCameraScan();
             });
             scanModalEl.addEventListener('hidden.bs.modal', () => {
@@ -1357,6 +1361,24 @@
                 scanUnsupported.textContent = 'Camera permission denied: ' + (err.message || '');
                 scanUnsupported.classList.remove('d-none');
             }
+        }
+    }
+
+    function showScanFeedback(type, message, autoHide = true) {
+        if (!scanFeedback) return;
+        const classes = {
+            success: 'alert-success',
+            danger: 'alert-danger',
+            warning: 'alert-warning',
+            info: 'alert-info'
+        };
+        scanFeedback.className = 'alert mb-3 ' + (classes[type] || classes.info);
+        scanFeedback.innerHTML = message;
+        scanFeedback.classList.remove('d-none');
+        if (autoHide) {
+            setTimeout(() => {
+                scanFeedback.classList.add('d-none');
+            }, 3000);
         }
     }
 
@@ -1553,9 +1575,9 @@
                     }
                     lastScanValue = raw;
                     lastScanAt = now;
-                    scanActive = false;
                     await handleScannedBarcode(raw);
-                    // Do not close the scan modal or stop camera; user will keep scanning
+                    // Continue scanning loop for next barcode
+                    if (scanActive) window.requestAnimationFrame(scanLoop);
                     return;
                 }
             }
@@ -1567,7 +1589,7 @@
 
     async function handleScannedBarcode(raw) {
         if (!canEdit) {
-            showFeedback('warning', '<i class="bi bi-lock-fill me-2"></i>This list is finalized. Camera scan is view-only.');
+            showScanFeedback('warning', '<i class="bi bi-lock-fill me-2"></i>This list is finalized. Camera scan is view-only.');
             scanActive = true;
             window.requestAnimationFrame(scanLoop);
             return;
@@ -1580,7 +1602,7 @@
             const data = await resp.json();
             const pool = [...(data.matches || []), ...(data.suggestions || [])];
             if (pool.length === 0) {
-                showFeedback('info', `<i class="bi bi-exclamation-triangle me-2"></i>No products found matching “${escapeAttr(query)}”.`);
+                showScanFeedback('warning', `<i class="bi bi-exclamation-triangle me-2"></i>No products found matching barcode: <strong>${escapeAttr(query)}</strong>`);
                 return;
             }
             const isNumeric = /^\d+$/.test(query);
@@ -1593,9 +1615,11 @@
                 chosen = pool.find(p => p.number === num) || null;
             }
             if (!chosen) chosen = pool[0];
+            // Clear any previous error messages on successful match
+            if (scanFeedback) scanFeedback.classList.add('d-none');
             openOnShelfPrompt(chosen);
         } catch (e) {
-            showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${e.message || 'Unable to search product'}`);
+            showScanFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${e.message || 'Unable to search product'}`);
         }
     }
 
