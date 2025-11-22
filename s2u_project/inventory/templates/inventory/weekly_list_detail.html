@@ -1324,7 +1324,10 @@
         if (hasMedia && scanModalEl) {
             const scanModal = new bootstrap.Modal(scanModalEl);
             cameraScanBtn.addEventListener('click', () => {
-                scanModal.show();
+                // Request permission up front to ensure the browser prompt appears on click
+                requestCameraPermission().finally(() => {
+                    scanModal.show();
+                });
             });
             scanModalEl.addEventListener('shown.bs.modal', () => {
                 startCameraScan();
@@ -1340,6 +1343,20 @@
         } else if (!hasMedia) {
             cameraScanBtn.disabled = true;
             cameraScanBtn.title = 'Camera access is not supported on this device or browser.';
+        }
+    }
+
+    async function requestCameraPermission() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+        try {
+            const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            // Immediately stop tracks; real stream will be started when modal opens
+            tmp.getTracks().forEach(t => t.stop());
+        } catch (err) {
+            if (scanUnsupported) {
+                scanUnsupported.textContent = 'Camera permission denied: ' + (err.message || '');
+                scanUnsupported.classList.remove('d-none');
+            }
         }
     }
 
@@ -1388,9 +1405,21 @@
             if (!zxingReader) {
                 zxingReader = new ZXing.BrowserMultiFormatReader();
             }
+
+            // First request camera permission and attach preview
+            scanStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: 'environment' } },
+                audio: false
+            });
+            scanTrack = (scanStream.getVideoTracks && scanStream.getVideoTracks()[0]) || null;
+            scanVideo.srcObject = scanStream;
+            await scanVideo.play();
+
+            const settings = scanTrack && typeof scanTrack.getSettings === 'function' ? scanTrack.getSettings() : {};
+            const deviceId = settings.deviceId || undefined;
+
             zxingActive = true;
-            // Let ZXing handle getUserMedia & video hookup; it will prompt for permission
-            await zxingReader.decodeFromVideoDevice(null, scanVideo, (result, err) => {
+            await zxingReader.decodeFromVideoDevice(deviceId || null, scanVideo, (result, err) => {
                 if (!zxingActive) return;
                 if (result) {
                     const raw = (result.getText && result.getText()) || '';
@@ -1400,6 +1429,11 @@
                         lastScanValue = raw;
                         lastScanAt = now;
                         handleScannedBarcode(raw);
+                    }
+                } else if (err && err.name === 'NotAllowedError') {
+                    if (scanUnsupported) {
+                        scanUnsupported.textContent = 'Camera permission denied. Please allow camera access and try again.';
+                        scanUnsupported.classList.remove('d-none');
                     }
                 }
             });
