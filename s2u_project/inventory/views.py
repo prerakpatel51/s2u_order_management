@@ -2530,7 +2530,7 @@ def weekly_export_custom(request, list_id):
         items = order_list.items.select_related("product", "transfer_from").filter(
             transfer_from__isnull=False,
             transfer_bottles__gt=0
-        ).order_by("product__name")
+        ).order_by("transfer_from__number", "product__name")
         columns = ["Product #", "Product Name", "Transfer From", "Transfer Bottles"]
     else:
         # Joe/BT/SQW: respective field > 0
@@ -2588,7 +2588,7 @@ def _export_custom_excel(request, order_list, items, export_type, columns):
             row_data = [
                 item.product.number,
                 item.product.name,
-                f"{item.transfer_from.name} (#{item.transfer_from.number})" if item.transfer_from else '',
+                f"#{item.transfer_from.number}" if item.transfer_from else '',
                 item.transfer_bottles or 0
             ]
         else:
@@ -2650,6 +2650,8 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), topMargin=0.5*inch, bottomMargin=0.5*inch)
 
+    # Evaluate queryset once so we can reuse for styling/grouping
+    items = list(items)
     elements = []
     styles = getSampleStyleSheet()
 
@@ -2668,15 +2670,17 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
 
     # Table data
     table_data = [columns]
+    store_numbers: list[str] = []
 
     for item in items:
         if export_type == 'transfer':
             row_data = [
                 str(item.product.number),
                 item.product.name[:40],
-                f"{item.transfer_from.name} (#{item.transfer_from.number})" if item.transfer_from else '',
+                f"#{item.transfer_from.number}" if item.transfer_from else '',
                 str(item.transfer_bottles or 0)
             ]
+            store_numbers.append(item.transfer_from.number if item.transfer_from else "—")
         else:
             row_data = [
                 item.product.name[:40],
@@ -2689,17 +2693,53 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
 
     # Create table
     table = Table(table_data, repeatRows=1)
-    table.setStyle(TableStyle([
+    style_cmds = [
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563EB')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('FONTSIZE', (0, 1), (-1, -1), 9),
-    ]))
+        ('GRID', (0, 0), (-1, -1), 0.9, colors.HexColor('#d0d7de')),
+        ('FONTSIZE', (0, 1), (-1, -1), 11),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]
+
+    if export_type == 'transfer':
+        # Apply a distinct pastel background for each store number to group rows visually
+        palette = [
+            colors.HexColor('#fff1f2'),
+            colors.HexColor('#eef2ff'),
+            colors.HexColor('#ecfeff'),
+            colors.HexColor('#fef3c7'),
+            colors.HexColor('#e0f2fe'),
+            colors.HexColor('#dcfce7'),
+            colors.HexColor('#fffbeb'),
+            colors.HexColor('#fdf4ff'),
+            colors.HexColor('#f3f4f6'),
+            colors.HexColor('#fafaf9'),
+            colors.HexColor('#f0f9ff'),
+            colors.HexColor('#f0fdf4'),
+            colors.HexColor('#eef2ff'),
+            colors.HexColor('#fef2f2'),
+            colors.HexColor('#e2e8f0'),
+        ]
+        color_map: dict[str, colors.Color] = {}
+        for idx, store_num in enumerate(store_numbers, start=1):  # start=1 because header is row 0
+            if store_num not in color_map:
+                color_map[store_num] = palette[len(color_map) % len(palette)]
+            bg = color_map[store_num]
+            style_cmds.append(('BACKGROUND', (0, idx), (-1, idx), bg))
+        # Tighten alignment for numeric columns in transfer export
+        style_cmds.extend([
+            ('ALIGN', (0, 1), (0, -1), 'CENTER'),
+            ('ALIGN', (2, 1), (-1, -1), 'CENTER'),
+        ])
+    else:
+        style_cmds.append(('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]))
+        style_cmds.append(('ALIGN', (0, 1), (-1, -1), 'LEFT'))
+
+    table.setStyle(TableStyle(style_cmds))
 
     elements.append(table)
     doc.build(elements)
@@ -2731,11 +2771,39 @@ def weekly_transfer_print(request, list_id):
     if not request.user.is_staff and not order_list.finalized_at:
         return JsonResponse({"error": "Transfer list is only available after finalization."}, status=403)
 
-    items = (
+    items_qs = (
         order_list.items.select_related("product", "transfer_from")
         .filter(transfer_from__isnull=False, transfer_bottles__gt=0)
-        .order_by("product__name")
+        .order_by("transfer_from__number", "product__name")
     )
+
+    # Assign a soft background color per transfer-from store to help visually group rows
+    palette = [
+        "#fdf2f2",  # warm pink
+        "#f0f9ff",  # light blue
+        "#f0fdf4",  # mint
+        "#fff7ed",  # peach
+        "#eef2ff",  # lavender
+        "#ecfeff",  # aqua
+        "#fef2f2",  # rose
+        "#fffbeb",  # pale yellow
+        "#f1f5f9",  # slate mist
+        "#fdf4ff",  # lilac
+        "#f3f4f6",  # light gray
+        "#fafaf9",  # sand
+        "#e0f2fe",  # sky
+        "#dcfce7",  # green tint
+        "#fef3c7",  # soft gold
+    ]
+    store_color_map: dict[str, str] = {}
+    items: list = []
+    for item in items_qs:
+        store_number = item.transfer_from.number if item.transfer_from else "—"
+        if store_number not in store_color_map:
+            store_color_map[store_number] = palette[len(store_color_map) % len(palette)]
+        # Attach a lightweight attribute for the template
+        item.row_color = store_color_map[store_number]
+        items.append(item)
 
     return render(
         request,

@@ -9,9 +9,24 @@
     body { background: #ffffff !important; }
     .card { box-shadow: none !important; border: none !important; }
   }
+  body { font-size: 1.05rem; }
   .transfer-table th, .transfer-table td {
     vertical-align: middle;
-    font-size: 0.9rem;
+    font-size: 1.05rem;
+    padding-top: 0.65rem;
+    padding-bottom: 0.65rem;
+  }
+  .transfer-table thead th {
+    font-size: 1.1rem;
+    letter-spacing: 0.01em;
+  }
+  .transfer-table tbody tr.store-row {
+    background: var(--store-color, #f8fafc) !important;
+    border-left: 4px solid var(--store-color, #f8fafc);
+    transition: background-color 120ms ease-in-out;
+  }
+  .transfer-table tbody tr.store-row:hover {
+    filter: brightness(0.98);
   }
 </style>
 {% endblock %}
@@ -61,12 +76,12 @@
           </thead>
           <tbody>
             {% for item in items %}
-            <tr>
+            <tr class="store-row" style="--store-color: {{ item.row_color }}">
               <td>{{ item.product.number }}</td>
               <td>{{ item.product.name }}</td>
               <td>
                 {% if item.transfer_from %}
-                  {{ item.transfer_from.name }} ({{ item.transfer_from.number }})
+                  #{{ item.transfer_from.number }}
                 {% else %}
                   —
                 {% endif %}
@@ -86,4 +101,3 @@
   </div>
 </div>
 {% endblock %}
-
