@@ -1307,8 +1307,8 @@
     let lastScanValue = '';
     let lastScanAt = 0;
 
-    // Initialize BarcodeDetector if supported
-    if (cameraScanBtn && canEdit) {
+    // Initialize BarcodeDetector if supported (allow modal even if list not editable; we'll gate writes later)
+    if (cameraScanBtn) {
         const hasMedia = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
         if ('BarcodeDetector' in window && hasMedia) {
             try {
@@ -1337,7 +1337,6 @@
                     scanModal.hide();
                 });
             }
-            });
         } else if (!hasMedia) {
             cameraScanBtn.disabled = true;
             cameraScanBtn.title = 'Camera access is not supported on this device or browser.';
@@ -1533,6 +1532,12 @@
     }
 
     async function handleScannedBarcode(raw) {
+        if (!canEdit) {
+            showFeedback('warning', '<i class="bi bi-lock-fill me-2"></i>This list is finalized. Camera scan is view-only.');
+            scanActive = true;
+            window.requestAnimationFrame(scanLoop);
+            return;
+        }
         const query = (raw || '').trim();
         if (!query) return;
         try {
