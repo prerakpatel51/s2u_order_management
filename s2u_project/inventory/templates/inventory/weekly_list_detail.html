@@ -881,12 +881,16 @@
     async function quickPickAndAdd(raw) {
         const query = (raw || '').trim();
         if (!query) return;
+        const now = Date.now();
+        const isBarcode = /^\d{6,}$/.test(query);
+        // Prevent double submissions when a scanner sends Enter after idle auto-submit
+        if (isBarcode && lastScanSubmit.value === query && now < lastScanSubmit.until) return;
+        if (isBarcode) lastScanSubmit = { value: query, until: now + SCAN.DUP_MS };
         try {
             const resp = await fetch(`{% url 'inventory:weekly_search' order_list.id %}?q=${encodeURIComponent(query)}`);
             if (!resp.ok) throw new Error('Search failed');
             const data = await resp.json();
             const pool = [...(data.matches || []), ...(data.suggestions || [])];
-            const isBarcode = /^\d{6,}$/.test(query);
             if (pool.length === 0) {
                 showFeedback('info', `<i class="bi bi-exclamation-triangle me-2"></i>No products found matching “${escapeAttr(query)}”.`);
                 if (isBarcode) playBeep(false);
@@ -1131,10 +1135,21 @@
             }
             const data = await response.json();
             const prev = items.get(data.product_number) || {};
+            const merged = { ...prev, ...data };
+            // Preserve cross-store stocks and cached monthly figures when the API omits them
             if (!('other_stocks' in data) && prev.other_stocks) {
-                data.other_stocks = prev.other_stocks;
+                merged.other_stocks = prev.other_stocks;
             }
-            items.set(data.product_number, data);
+            if (!('monthly_sales' in data) && prev.monthly_sales != null) {
+                merged.monthly_sales = prev.monthly_sales;
+            }
+            if (!('other_monthly_sales' in data) && prev.other_monthly_sales) {
+                merged.other_monthly_sales = prev.other_monthly_sales;
+            }
+            if (!('_monthly_cached' in data) && prev._monthly_cached) {
+                merged._monthly_cached = prev._monthly_cached;
+            }
+            items.set(data.product_number, merged);
             renderTable();
         } catch (error) {
             showFeedback('danger', `<i class="bi bi-exclamation-octagon me-2"></i>${error.message}`);
@@ -1193,6 +1208,7 @@
         }
         const index = Number(item.dataset.index);
         const product = suggestions[index];
+        cancelScanFinish();
         hideSuggestions();
         queryInput.value = '';
         await addProduct(product.number);
@@ -1202,6 +1218,13 @@
     const SCAN = { MIN_LEN: 6, IDLE_MS: 120, DUP_MS: 350 };
     let scanIdleTimer = null;
     let lastScanSubmit = { value: '', until: 0 };
+
+    function cancelScanFinish() {
+        if (scanIdleTimer) {
+            clearTimeout(scanIdleTimer);
+            scanIdleTimer = null;
+        }
+    }
 
     function scheduleScanFinish() {
         if (!canEdit) return;
@@ -1213,7 +1236,6 @@
         scanIdleTimer = setTimeout(async () => {
             const now = Date.now();
             if (lastScanSubmit.value === v && now < lastScanSubmit.until) return; // duplicate guard
-            lastScanSubmit = { value: v, until: now + SCAN.DUP_MS };
             await quickPickAndAdd(v);
         }, SCAN.IDLE_MS);
     }
@@ -1253,9 +1275,9 @@
             // Only auto-submit Tab when the value looks like a pure numeric barcode.
             if (/^\d{6,}$/.test(v)) {
                 event.preventDefault();
+                cancelScanFinish();
                 const now = Date.now();
                 if (!(lastScanSubmit.value === v && now < lastScanSubmit.until)) {
-                    lastScanSubmit = { value: v, until: now + SCAN.DUP_MS };
                     await quickPickAndAdd(v);
                 }
                 return;
@@ -1263,6 +1285,7 @@
         }
         if (event.key === 'Enter') {
             event.preventDefault();
+            cancelScanFinish();
             const current = queryInput.value.trim();
             // Only trust suggestions if they were produced for the current input.
             // This avoids using stale suggestions from a previous scan.
