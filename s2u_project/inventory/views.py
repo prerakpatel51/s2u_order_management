@@ -2531,7 +2531,7 @@ def weekly_export_custom(request, list_id):
             transfer_from__isnull=False,
             transfer_bottles__gt=0
         ).order_by("transfer_from__number", "product__name")
-        columns = ["Product #", "Product Name", "Transfer From", "Transfer Bottles"]
+        columns = ["Product #", "Product Name", "From", "Bottles"]
     else:
         # Joe/BT/SQW: respective field > 0
         filter_kwargs = {f"{export_type}__gt": 0}
