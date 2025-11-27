@@ -2639,7 +2639,7 @@ def _export_custom_excel(request, order_list, items, export_type, columns):
 def _export_custom_pdf(request, order_list, items, export_type, columns):
     """Generate PDF for custom export."""
     from django.http import HttpResponse
-    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.lib.pagesizes import letter, landscape, A4
     from reportlab.lib import colors
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -2648,7 +2648,18 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
     import io
 
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), topMargin=0.5*inch, bottomMargin=0.5*inch)
+    # Transfer list should match print view: A4 portrait, tighter margins
+    if export_type == "transfer":
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            topMargin=0.5 * inch,
+            bottomMargin=0.5 * inch,
+            leftMargin=0.45 * inch,
+            rightMargin=0.45 * inch,
+        )
+    else:
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), topMargin=0.5*inch, bottomMargin=0.5*inch)
 
     # Evaluate queryset once so we can reuse for styling/grouping
     items = list(items)
@@ -2691,57 +2702,56 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
             ]
         table_data.append(row_data)
 
-    # Create table
-    table = Table(table_data, repeatRows=1)
-    style_cmds = [
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563EB')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 13),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 14),
-        ('GRID', (0, 0), (-1, -1), 0.9, colors.HexColor('#d0d7de')),
-        ('FONTSIZE', (0, 1), (-1, -1), 12),
-        ('TOPPADDING', (0, 1), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ]
-
-    if export_type == 'transfer':
-        # Apply a distinct pastel background for each store number to group rows visually
+    # Create table with layout tuned per export type
+    if export_type == "transfer":
+        col_widths = [0.9 * inch, 4.4 * inch, 1.0 * inch, 0.85 * inch]
+        table = Table(table_data, repeatRows=1, colWidths=col_widths)
+        style_cmds = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563EB')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 11.5),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('GRID', (0, 0), (-1, -1), 0.8, colors.HexColor('#d0d7de')),
+            ('FONTSIZE', (0, 1), (-1, -1), 10.5),
+            ('TOPPADDING', (0, 1), (-1, -1), 7),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 7),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (3, 0), (3, 0), 'RIGHT'),
+            ('ALIGN', (0, 1), (0, -1), 'CENTER'),
+            ('ALIGN', (2, 1), (2, -1), 'CENTER'),
+            ('ALIGN', (3, 1), (3, -1), 'RIGHT'),
+        ]
+        # Apply pastel backgrounds per transfer-from store
         palette = [
-            colors.HexColor('#fff1f2'),
-            colors.HexColor('#eef2ff'),
-            colors.HexColor('#ecfeff'),
-            colors.HexColor('#fef3c7'),
-            colors.HexColor('#e0f2fe'),
-            colors.HexColor('#dcfce7'),
-            colors.HexColor('#fffbeb'),
-            colors.HexColor('#fdf4ff'),
-            colors.HexColor('#f3f4f6'),
-            colors.HexColor('#fafaf9'),
-            colors.HexColor('#f0f9ff'),
-            colors.HexColor('#f0fdf4'),
-            colors.HexColor('#eef2ff'),
-            colors.HexColor('#fef2f2'),
-            colors.HexColor('#e2e8f0'),
+            colors.HexColor('#fdf2f2'), colors.HexColor('#f0f9ff'), colors.HexColor('#f0fdf4'),
+            colors.HexColor('#fff7ed'), colors.HexColor('#eef2ff'), colors.HexColor('#ecfeff'),
+            colors.HexColor('#fef2f2'), colors.HexColor('#e2e8f0'), colors.HexColor('#f3f4f6'),
         ]
         color_map: dict[str, colors.Color] = {}
-        for idx, store_num in enumerate(store_numbers, start=1):  # start=1 because header is row 0
+        for idx, store_num in enumerate(store_numbers, start=1):  # header is row 0
             if store_num not in color_map:
                 color_map[store_num] = palette[len(color_map) % len(palette)]
-            bg = color_map[store_num]
-            style_cmds.append(('BACKGROUND', (0, idx), (-1, idx), bg))
-        # Tighten alignment for numeric columns in transfer export
-        style_cmds.extend([
-            ('ALIGN', (0, 1), (0, -1), 'CENTER'),
-            ('ALIGN', (2, 1), (-1, -1), 'CENTER'),
-        ])
+            style_cmds.append(('BACKGROUND', (0, idx), (-1, idx), color_map[store_num]))
+        table.setStyle(TableStyle(style_cmds))
     else:
-        style_cmds.append(('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]))
-        style_cmds.append(('ALIGN', (0, 1), (-1, -1), 'LEFT'))
-
-    table.setStyle(TableStyle(style_cmds))
+        table = Table(table_data, repeatRows=1)
+        style_cmds = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563EB')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 13),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 14),
+            ('GRID', (0, 0), (-1, -1), 0.9, colors.HexColor('#d0d7de')),
+            ('FONTSIZE', (0, 1), (-1, -1), 12),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+        ]
+        table.setStyle(TableStyle(style_cmds))
 
     elements.append(table)
     doc.build(elements)
