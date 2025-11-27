@@ -2687,7 +2687,7 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
         if export_type == 'transfer':
             row_data = [
                 str(item.product.number),
-                item.product.name[:40],
+                item.product.name[:36],
                 f"#{item.transfer_from.number}" if item.transfer_from else '',
                 str(item.transfer_bottles or 0)
             ]
@@ -2705,7 +2705,8 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
     # Create table with layout tuned per export type
     if export_type == "transfer":
         # Fits within A4 portrait printable width (~7.37") after 0.45" margins
-        col_widths = [0.9 * inch, 4.2 * inch, 1.05 * inch, 0.85 * inch]
+        # Total ~7.07" within printable A4 width (~7.37")
+        col_widths = [0.9 * inch, 3.9 * inch, 1.35 * inch, 0.92 * inch]
         table = Table(table_data, repeatRows=1, colWidths=col_widths)
         style_cmds = [
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563EB')),
