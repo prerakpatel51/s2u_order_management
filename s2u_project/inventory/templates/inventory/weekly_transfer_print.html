@@ -4,10 +4,22 @@
 
 {% block extra_head %}
 <style>
+  @page {
+    size: A4 portrait;
+    margin: 12mm 10mm 16mm 10mm;
+  }
   @media print {
     .no-print { display: none !important; }
-    body { background: #ffffff !important; }
+    html, body { width: 210mm; background: #ffffff !important; }
+    body { font-size: 11pt; }
+    .container-xl { max-width: 190mm; }
     .card { box-shadow: none !important; border: none !important; }
+    .transfer-table th, .transfer-table td {
+      padding-top: 0.45rem;
+      padding-bottom: 0.45rem;
+      font-size: 10.5pt;
+    }
+    .transfer-table thead th { font-size: 11.5pt; }
   }
   body { font-size: 1.05rem; }
   .transfer-table th, .transfer-table td {
@@ -20,6 +32,8 @@
     font-size: 1.1rem;
     letter-spacing: 0.01em;
   }
+  .transfer-table { table-layout: fixed; }
+  .transfer-table td:nth-child(2) { word-break: break-word; }
   .transfer-table tbody tr.store-row {
     background: var(--store-color, #f8fafc) !important;
     border-left: 4px solid var(--store-color, #f8fafc);
