@@ -2546,6 +2546,22 @@ def weekly_export_custom(request, list_id):
         return _export_custom_pdf(request, order_list, items, export_type, columns)
 
 
+# Shared styling constants for transfer list exports/prints
+TRANSFER_ROW_COLORS = [
+    "#fdf2f2",
+    "#f0f9ff",
+    "#f0fdf4",
+    "#fff7ed",
+    "#eef2ff",
+    "#ecfeff",
+    "#fef2f2",
+    "#e2e8f0",
+    "#f3f4f6",
+]
+# Widths mirror the PDF layout (~7.07\" usable width on A4 portrait)
+TRANSFER_PDF_COL_WIDTHS_IN = (0.9, 3.9, 1.35, 0.92)
+
+
 def _export_custom_excel(request, order_list, items, export_type, columns):
     """Generate Excel for custom export."""
     from django.http import HttpResponse
@@ -2706,7 +2722,7 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
     if export_type == "transfer":
         # Fits within A4 portrait printable width (~7.37") after 0.45" margins
         # Total ~7.07" within printable A4 width (~7.37")
-        col_widths = [0.9 * inch, 3.9 * inch, 1.35 * inch, 0.92 * inch]
+        col_widths = [w * inch for w in TRANSFER_PDF_COL_WIDTHS_IN]
         table = Table(table_data, repeatRows=1, colWidths=col_widths)
         style_cmds = [
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563EB')),
@@ -2719,17 +2735,13 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
             ('TOPPADDING', (0, 1), (-1, -1), 7),
             ('BOTTOMPADDING', (0, 1), (-1, -1), 7),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (3, 0), (3, 0), 'RIGHT'),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('ALIGN', (0, 1), (0, -1), 'CENTER'),
             ('ALIGN', (2, 1), (2, -1), 'CENTER'),
             ('ALIGN', (3, 1), (3, -1), 'RIGHT'),
         ]
         # Apply pastel backgrounds per transfer-from store
-        palette = [
-            colors.HexColor('#fdf2f2'), colors.HexColor('#f0f9ff'), colors.HexColor('#f0fdf4'),
-            colors.HexColor('#fff7ed'), colors.HexColor('#eef2ff'), colors.HexColor('#ecfeff'),
-            colors.HexColor('#fef2f2'), colors.HexColor('#e2e8f0'), colors.HexColor('#f3f4f6'),
-        ]
+        palette = [colors.HexColor(c) for c in TRANSFER_ROW_COLORS]
         color_map: dict[str, colors.Color] = {}
         for idx, store_num in enumerate(store_numbers, start=1):  # header is row 0
             if store_num not in color_map:
@@ -2791,30 +2803,12 @@ def weekly_transfer_print(request, list_id):
         .order_by("transfer_from__number", "product__name")
     )
 
-    # Assign a soft background color per transfer-from store to help visually group rows
-    palette = [
-        "#fdf2f2",  # warm pink
-        "#f0f9ff",  # light blue
-        "#f0fdf4",  # mint
-        "#fff7ed",  # peach
-        "#eef2ff",  # lavender
-        "#ecfeff",  # aqua
-        "#fef2f2",  # rose
-        "#fffbeb",  # pale yellow
-        "#f1f5f9",  # slate mist
-        "#fdf4ff",  # lilac
-        "#f3f4f6",  # light gray
-        "#fafaf9",  # sand
-        "#e0f2fe",  # sky
-        "#dcfce7",  # green tint
-        "#fef3c7",  # soft gold
-    ]
     store_color_map: dict[str, str] = {}
     items: list = []
     for item in items_qs:
         store_number = str(item.transfer_from.number) if item.transfer_from else "—"
         if store_number not in store_color_map:
-            store_color_map[store_number] = palette[len(store_color_map) % len(palette)]
+            store_color_map[store_number] = TRANSFER_ROW_COLORS[len(store_color_map) % len(TRANSFER_ROW_COLORS)]
         # Attach a lightweight attribute for the template
         item.row_color = store_color_map[store_number]
         items.append(item)

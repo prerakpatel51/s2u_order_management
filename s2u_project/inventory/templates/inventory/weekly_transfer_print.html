@@ -6,13 +6,13 @@
 <style>
   @page {
     size: A4 portrait;
-    margin: 12mm 10mm 16mm 10mm;
+    margin: 12.7mm 11.43mm;
   }
   @media print {
     .no-print { display: none !important; }
     html, body { width: 210mm; background: #ffffff !important; }
     body { font-size: 11pt; }
-    .container-xl { max-width: 190mm; }
+    .container-xl { max-width: 187mm; }
     .card { box-shadow: none !important; border: none !important; }
     .transfer-table th, .transfer-table td {
       padding-top: 0.45rem;
@@ -22,40 +22,35 @@
     .transfer-table thead th { font-size: 11.5pt; }
   }
   body { font-size: 1.05rem; }
+  .transfer-table {
+    table-layout: fixed;
+    border-collapse: collapse;
+    width: 100%;
+  }
   .transfer-table th, .transfer-table td {
     vertical-align: middle;
     font-size: 1.05rem;
     padding-top: 0.65rem;
     padding-bottom: 0.65rem;
+    border: 1px solid #d0d7de;
   }
   .transfer-table thead th {
     font-size: 1.1rem;
     letter-spacing: 0.01em;
-  }
-  .transfer-table { table-layout: fixed; }
-  .transfer-table td:nth-child(2) { word-break: break-word; }
-  .transfer-table thead th {
     background: #2563EB;
     color: #fff;
-    border-color: #d0d7de;
+    text-align: center;
   }
-  .transfer-table tbody td, .transfer-table tbody th {
-    border-color: #d0d7de;
-  }
+  .transfer-table td:nth-child(2) { word-break: break-word; }
   .transfer-table tbody td:nth-child(1),
   .transfer-table tbody td:nth-child(3) { text-align: center; }
   .transfer-table tbody td:nth-child(4) { text-align: right; }
-  .transfer-table colgroup col:nth-child(1) { width: 14%; }
-  .transfer-table colgroup col:nth-child(2) { width: 55%; }
-  .transfer-table colgroup col:nth-child(3) { width: 16%; }
-  .transfer-table colgroup col:nth-child(4) { width: 15%; }
+  .transfer-table colgroup col:nth-child(1) { width: 12.7%; }
+  .transfer-table colgroup col:nth-child(2) { width: 55.2%; }
+  .transfer-table colgroup col:nth-child(3) { width: 19.1%; }
+  .transfer-table colgroup col:nth-child(4) { width: 13%; }
   .transfer-table tbody tr.store-row {
     background: var(--store-color, #f8fafc) !important;
-    border-left: 4px solid var(--store-color, #f8fafc);
-    transition: background-color 120ms ease-in-out;
-  }
-  .transfer-table tbody tr.store-row:hover {
-    filter: brightness(0.98);
   }
 </style>
 {% endblock %}
@@ -94,7 +89,7 @@
 
       {% if items %}
       <div class="table-responsive">
-        <table class="table table-striped table-sm transfer-table">
+        <table class="table table-sm transfer-table">
           <colgroup>
             <col>
             <col>
@@ -106,7 +101,7 @@
               <th scope="col">Product #</th>
               <th scope="col">Product Name</th>
               <th scope="col">From</th>
-              <th scope="col" class="text-end">Bottles</th>
+              <th scope="col">Bottles</th>
             </tr>
           </thead>
           <tbody>
