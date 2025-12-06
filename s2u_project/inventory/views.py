@@ -5,6 +5,7 @@ import threading
 import time
 from decimal import Decimal
 from difflib import SequenceMatcher
+from functools import reduce
 from typing import Iterable, List, Tuple, Optional, Dict
 from uuid import UUID
 
@@ -387,16 +388,40 @@ def _search_products_paginated(query: str, page: int = 1, page_size: int = 10) -
         exact_q |= Q(number=int(query))
     normalized_query = _normalize(query)
 
-    # Candidate window size: enough to rank a good page quickly without touching
-    # the whole table. Scale with page_size; cap at 600.
-    window = min(600, max(120, page_size * 12))
+    # Candidate window size: scale with page size; keep slightly larger to avoid
+    # truncating relevant results when the filter is broad (e.g., many "750ML" hits).
+    window = min(800, max(200, page_size * 20))
 
-    candidates = (
-        Product.objects.filter(filters | exact_q | Q(barcodes__code__icontains=query))
-        .distinct()
-        .only("number", "name", "barcode", "supplier_name")
-        .order_by("name")[:window]
-    )
+    # Require all tokens when possible so multi-word queries (brand + format)
+    # aren't drowned out by broad OR filters like "750ML".
+    token_filters = []
+    for token in tokens:
+        token_filters.append(
+            Q(name__icontains=token) | Q(supplier_name__icontains=token) | Q(barcodes__code__icontains=token)
+        )
+    token_and_q = reduce(lambda acc, q: acc & q, token_filters, Q()) if token_filters else None
+
+    strong_candidates: List[Product] = []
+    if token_and_q:
+        strong_candidates = list(
+            Product.objects.filter(token_and_q)
+            .distinct()
+            .only("number", "name", "barcode", "supplier_name")
+            .order_by("name")[:window]
+        )
+
+    remaining = max(window - len(strong_candidates), 0)
+    fallback_candidates: List[Product] = []
+    if remaining:
+        fallback_candidates = list(
+            Product.objects.filter(filters | exact_q | Q(barcodes__code__icontains=query))
+            .exclude(pk__in=[p.pk for p in strong_candidates])
+            .distinct()
+            .only("number", "name", "barcode", "supplier_name")
+            .order_by("name")[:remaining]
+        )
+
+    candidates = strong_candidates + fallback_candidates
 
     ranked: List[Tuple[int, float, Product]] = []
     for product in candidates:
@@ -2564,7 +2589,7 @@ def weekly_export_custom(request, list_id):
         if supplier_q:
             items = items.filter(supplier_q)
         items = items.order_by("product__name")
-        columns = ["Product Name", "Barcode", "Supplier", export_type.upper()]
+        columns = ["Product Name", "Barcode", export_type.upper()]
 
     logger.info(f"[EXPORT] Found {items.count()} items matching filter")
 
@@ -2639,7 +2664,6 @@ def _export_custom_excel(request, order_list, items, export_type, columns):
             row_data = [
                 item.product.name,
                 item.product.barcode or '',
-                item.product.supplier_name or '',
                 getattr(item, export_type, 0) or 0
             ]
         ws.append(row_data)
@@ -2740,7 +2764,6 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
             row_data = [
                 item.product.name[:40],
                 item.product.barcode or '',
-                item.product.supplier_name[:20] if item.product.supplier_name else '',
                 str(getattr(item, export_type, 0) or 0)
             ]
         table_data.append(row_data)
