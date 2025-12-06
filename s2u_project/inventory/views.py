@@ -170,6 +170,8 @@ def _search_products(query: str) -> Tuple[List[Product], List[Product]]:
     """
     results: List[Product] = []
     suggestions: List[Product] = []
+    tokens_raw = [t.strip() for t in re.split(r"[\s\-]+", query) if len(t.strip()) >= 2]
+    tokens_normalized = [_normalize(t) for t in tokens_raw]
 
     # Start with basic filter - exact query
     filters = (
@@ -223,8 +225,7 @@ def _search_products(query: str) -> Tuple[List[Product], List[Product]]:
 
     # Split into tokens and search each word independently
     # This helps with multi-word queries like "titos vodka"
-    tokens = [t.strip() for t in re.split(r"[\s\-]+", query) if len(t.strip()) >= 2]
-    for token in tokens:
+    for token in tokens_raw:
         # Add original token
         filters |= Q(name__icontains=token)
 
@@ -263,6 +264,18 @@ def _search_products(query: str) -> Tuple[List[Product], List[Product]]:
         normalized_name = _normalize(product.name)
         lowers_name = product.name.lower()
         query_lower = query.lower()
+        token_match_count = sum(1 for t in tokens_normalized if t and t in normalized_name)
+        all_tokens_match = bool(tokens_normalized) and token_match_count == len(tokens_normalized)
+
+        # Drop very weak matches when user typed multiple terms (e.g., brand + size).
+        if tokens_normalized and len(tokens_normalized) >= 2 and token_match_count < 2:
+            continue
+
+        if all_tokens_match:
+            # Heavy weight to entries that include every token (brand + format)
+            priority += 30
+        elif token_match_count:
+            priority += 8
 
         # Exact matches get highest priority
         if product.barcode and product.barcode == query:
@@ -295,13 +308,7 @@ def _search_products(query: str) -> Tuple[List[Product], List[Product]]:
             priority += 3
 
         # Token matching - each word in query appears somewhere in product name
-        query_tokens = [_normalize(t) for t in re.split(r'\s+', query) if len(t) > 1]
-        if query_tokens:
-            matches = sum(1 for token in query_tokens if token in normalized_name)
-            if matches == len(query_tokens):
-                priority += 4  # All tokens match
-            elif matches > 0:
-                priority += 2  # Partial token match
+        # Token matching already counted above
 
         # Supplier name bonus
         if product.supplier_name and query_lower in product.supplier_name.lower():
@@ -375,6 +382,7 @@ def _search_products_paginated(query: str, page: int = 1, page_size: int = 10) -
 
     # Token-level fuzzy
     tokens = [t.strip() for t in re.split(r"[\s\-]+", query) if len(t.strip()) >= 2]
+    tokens_normalized = [_normalize(t) for t in tokens]
     for token in tokens:
         filters |= Q(name__icontains=token)
         token_clean = re.sub(r"[^a-zA-Z0-9]", "", token)
@@ -429,6 +437,16 @@ def _search_products_paginated(query: str, page: int = 1, page_size: int = 10) -
         normalized_name = _normalize(product.name)
         lowers_name = product.name.lower()
         query_lower = query.lower()
+        token_match_count = sum(1 for t in tokens_normalized if t and t in normalized_name)
+        all_tokens_match = bool(tokens_normalized) and token_match_count == len(tokens_normalized)
+
+        if tokens_normalized and len(tokens_normalized) >= 2 and token_match_count < 2:
+            continue
+
+        if all_tokens_match:
+            priority += 30
+        elif token_match_count:
+            priority += 8
 
         if product.barcode and product.barcode == query:
             priority += 10
@@ -447,13 +465,7 @@ def _search_products_paginated(query: str, page: int = 1, page_size: int = 10) -
             priority += 5
         if query_lower in lowers_name:
             priority += 3
-        query_tokens = [_normalize(t) for t in re.split(r'\s+', query) if len(t) > 1]
-        if query_tokens:
-            matches = sum(1 for token in query_tokens if token in normalized_name)
-            if matches == len(query_tokens):
-                priority += 4
-            elif matches > 0:
-                priority += 2
+        # Token match already reflected in the weights above
         if product.supplier_name and query_lower in product.supplier_name.lower():
             priority += 1
         ratio = SequenceMatcher(None, normalized_query, normalized_name).ratio()
