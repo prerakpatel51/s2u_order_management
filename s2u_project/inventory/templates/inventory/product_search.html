@@ -209,6 +209,52 @@
         } catch (_) {}
     }
 
+    function isBarcodeQuery(value) {
+        return /^\d{6,}$/.test(value || '');
+    }
+
+    function matchesBarcode(candidate, query) {
+        const q = String(query || '').trim();
+        if (!q) return false;
+        if (candidate.barcode && String(candidate.barcode) === q) return true;
+        if (Array.isArray(candidate.barcodes) && candidate.barcodes.some(c => String(c) === q)) return true;
+        return false;
+    }
+
+    // Lightweight relevance scorer to pick best suggestion or API result.
+    function scoreCandidate(candidate, query) {
+        if (!candidate || !query) return 0;
+        const q = query.toLowerCase();
+        const name = (candidate.name || '').toLowerCase();
+        const barcode = (candidate.barcode || '').toLowerCase();
+        const barcodes = Array.isArray(candidate.barcodes) ? candidate.barcodes.map(b => String(b).toLowerCase()) : [];
+        const number = candidate.number != null ? String(candidate.number) : '';
+        let score = 0;
+        if (barcode === q) score += 80;
+        if (barcodes.includes(q)) score += 75;
+        if (number && number === q) score += 70;
+        if (name === q) score += 50;
+        if (name.startsWith(q)) score += 40;
+        if (name.includes(q)) score += 25;
+        const supplier = (candidate.supplier_name || '').toLowerCase();
+        if (supplier && supplier.includes(q)) score += 10;
+        return score;
+    }
+
+    function pickBest(candidates, query) {
+        if (!Array.isArray(candidates) || !candidates.length) return null;
+        let best = candidates[0];
+        let bestScore = scoreCandidate(best, query);
+        for (let i = 1; i < candidates.length; i++) {
+            const s = scoreCandidate(candidates[i], query);
+            if (s > bestScore) {
+                bestScore = s;
+                best = candidates[i];
+            }
+        }
+        return best;
+    }
+
     async function quickPickAndAddSearch(raw) {
         const query = (raw || '').trim();
         if (!query) return;
@@ -217,23 +263,24 @@
             if (!resp.ok) throw new Error('Search failed');
             const data = await resp.json();
             const pool = [...(data.matches || []), ...(data.suggestions || [])];
-            const isBarcode = /^\d{6,}$/.test(query);
+            const isBarcode = isBarcodeQuery(query);
             if (pool.length === 0) {
                 feedback.innerHTML = `<i class=\"bi bi-exclamation-triangle me-1\"></i>No results for “${query}”.`;
                 if (isBarcode) playBeep(false);
                 return;
             }
-            const numeric = /^\d+$/.test(query) ? Number(query) : null;
-            let chosen = pool.find(p => p.barcode && p.barcode === query);
-            if (!chosen) {
-                chosen = pool.find(p =>
-                    Array.isArray(p.barcodes) && p.barcodes.includes(query)
-                ) || null;
+            let chosen;
+            if (isBarcode) {
+                chosen = pool.find(p => matchesBarcode(p, query));
+                if (!chosen) {
+                    feedback.innerHTML = `<i class=\"bi bi-exclamation-triangle me-1\"></i>No exact barcode match for “${query}”.`;
+                    playBeep(false);
+                    return;
+                }
+            } else {
+                // Choose the best-scoring candidate instead of just the first
+                chosen = pickBest(pool, query) || pool[0];
             }
-            if (!chosen && numeric !== null) {
-                chosen = pool.find(p => p.number === numeric) || null;
-            }
-            if (!chosen) chosen = pool[0];
             await addProduct(chosen);
             if (isBarcode) playBeep(true);
             input.value = '';
@@ -683,34 +730,25 @@
                     if (!resp.ok) throw new Error('Search failed');
                     const data = await resp.json();
                     const pool = [...(data.matches || []), ...(data.suggestions || [])];
-                    const isBarcode = /^\d{6,}$/.test(raw);
+                    const isBarcode = isBarcodeQuery(raw);
                     if (pool.length === 0) {
                         feedback.innerHTML = `<i class=\"bi bi-exclamation-triangle me-1\"></i>No results for “${raw}”.`;
                         if (isBarcode) playBeep(false);
                         return;
                     }
-                    const numeric = /^\d+$/.test(raw) ? Number(raw) : null;
-                    let chosen = pool.find(p => p.barcode && p.barcode === raw);
-                    if (!chosen) {
-                        chosen = pool.find(p =>
-                            Array.isArray(p.barcodes) && p.barcodes.includes(raw)
-                        ) || null;
-                    }
-                    if (!chosen && numeric !== null) {
-                        chosen = pool.find(p => p.number === numeric) || null;
-                    }
+                    let chosen;
                     if (isBarcode) {
-                        if (chosen) {
-                            await addProduct(chosen);
-                            playBeep(true);
-                        } else {
+                        chosen = pool.find(p => matchesBarcode(p, raw));
+                        if (!chosen) {
                             feedback.innerHTML = `<i class=\"bi bi-exclamation-triangle me-1\"></i>No exact barcode match for “${raw}”.`;
                             playBeep(false);
+                            return;
                         }
+                        playBeep(true);
                     } else {
-                        if (!chosen) chosen = pool[0];
-                        await addProduct(chosen);
+                        chosen = pickBest(pool, raw) || pool[0];
                     }
+                    await addProduct(chosen);
                 } catch (e) {
                     feedback.innerHTML = `<i class=\"bi bi-exclamation-octagon text-danger me-1\"></i>${e.message || 'Unable to add product'}`;
                 }
@@ -725,9 +763,22 @@
             event.preventDefault();
             highlight(highlighted > 0 ? highlighted - 1 : maxIndex);
         } else if (event.key === 'Enter') {
+            // Pick highlighted; otherwise choose the best-scoring suggestion
+            event.preventDefault();
+            let pick = null;
             if (highlighted >= 0 && highlighted <= maxIndex) {
-                event.preventDefault();
-                await addProduct({ ...suggestionsData[highlighted] });
+                pick = suggestionsData[highlighted];
+            } else {
+                pick = pickBest(suggestionsData, input.value.trim()) || suggestionsData[0];
+            }
+            if (pick) {
+                const q = input.value.trim();
+                if (isBarcodeQuery(q) && !matchesBarcode(pick, q)) {
+                    feedback.innerHTML = `<i class=\"bi bi-exclamation-triangle me-1\"></i>No exact barcode match for “${q}”.`;
+                    playBeep(false);
+                    return;
+                }
+                await addProduct({ ...pick });
             }
         } else if (event.key === 'Escape') {
             hideSuggestions();

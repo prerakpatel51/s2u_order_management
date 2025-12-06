@@ -177,6 +177,15 @@ def _search_products(query: str) -> Tuple[List[Product], List[Product]]:
         | Q(supplier_name__icontains=query)
     )
 
+    # Apostrophe-insensitive match (e.g., Tito's vs Titos)
+    query_no_apost = re.sub(r"[’'`]", "", query)
+    if query_no_apost and query_no_apost != query:
+        filters |= (
+            Q(name__icontains=query_no_apost)
+            | Q(barcode__icontains=query_no_apost)
+            | Q(supplier_name__icontains=query_no_apost)
+        )
+
     # KEY FIX: Use regex to match query letters with optional special chars between them
     # This allows "titos" to match "TITO'S", "grey" to match "grey", etc.
     # Sanitize the query to get just alphanumeric characters
@@ -341,6 +350,15 @@ def _search_products_paginated(query: str, page: int = 1, page_size: int = 10) -
         | Q(barcode__icontains=query)
         | Q(supplier_name__icontains=query)
     )
+
+    # Apostrophe-insensitive match (e.g., Tito's vs Titos)
+    query_no_apost = re.sub(r"[’'`]", "", query)
+    if query_no_apost and query_no_apost != query:
+        filters |= (
+            Q(name__icontains=query_no_apost)
+            | Q(barcode__icontains=query_no_apost)
+            | Q(supplier_name__icontains=query_no_apost)
+        )
 
     sanitized = re.sub(r"[^a-zA-Z0-9\s]", "", query)
     if sanitized and sanitized != query:
@@ -2525,6 +2543,12 @@ def weekly_export_custom(request, list_id):
             return JsonResponse({"error": "Transfer list export is only available after finalization."}, status=403)
 
     # Filter items based on export type
+    supplier_filters = {
+        "joe": Q(product__supplier_name__icontains="republic national") | Q(product__supplier_name__icontains="rndc"),
+        "sqw": Q(product__supplier_name__icontains="southern glazer"),
+        "bt": Q(product__supplier_name__icontains="breakthrough") | Q(product__supplier_name__icontains="premier beverage"),
+    }
+
     if export_type == 'transfer':
         # Transfer: has transfer_from AND transfer_bottles > 0
         items = order_list.items.select_related("product", "transfer_from").filter(
@@ -2535,8 +2559,12 @@ def weekly_export_custom(request, list_id):
     else:
         # Joe/BT/SQW: respective field > 0
         filter_kwargs = {f"{export_type}__gt": 0}
-        items = order_list.items.select_related("product").filter(**filter_kwargs).order_by("product__name")
-        columns = ["Product Name", "Barcode", "Supplier", "System Stock", export_type.upper()]
+        items = order_list.items.select_related("product").filter(**filter_kwargs)
+        supplier_q = supplier_filters.get(export_type)
+        if supplier_q:
+            items = items.filter(supplier_q)
+        items = items.order_by("product__name")
+        columns = ["Product Name", "Barcode", "Supplier", export_type.upper()]
 
     logger.info(f"[EXPORT] Found {items.count()} items matching filter")
 
@@ -2612,7 +2640,6 @@ def _export_custom_excel(request, order_list, items, export_type, columns):
                 item.product.name,
                 item.product.barcode or '',
                 item.product.supplier_name or '',
-                item.system_stock or 0,
                 getattr(item, export_type, 0) or 0
             ]
         ws.append(row_data)
@@ -2675,7 +2702,8 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
             rightMargin=0.45 * inch,
         )
     else:
-        doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), topMargin=0.5*inch, bottomMargin=0.5*inch)
+        # Joe/BT/SQW exports: portrait layout for easier printing
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
 
     # Evaluate queryset once so we can reuse for styling/grouping
     items = list(items)
@@ -2713,7 +2741,6 @@ def _export_custom_pdf(request, order_list, items, export_type, columns):
                 item.product.name[:40],
                 item.product.barcode or '',
                 item.product.supplier_name[:20] if item.product.supplier_name else '',
-                str(item.system_stock or 0),
                 str(getattr(item, export_type, 0) or 0)
             ]
         table_data.append(row_data)
