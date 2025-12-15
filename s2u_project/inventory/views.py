@@ -2580,12 +2580,6 @@ def weekly_export_custom(request, list_id):
             return JsonResponse({"error": "Transfer list export is only available after finalization."}, status=403)
 
     # Filter items based on export type
-    supplier_filters = {
-        "joe": Q(product__supplier_name__icontains="republic national") | Q(product__supplier_name__icontains="rndc"),
-        "sqw": Q(product__supplier_name__icontains="southern glazer"),
-        "bt": Q(product__supplier_name__icontains="breakthrough") | Q(product__supplier_name__icontains="premier beverage"),
-    }
-
     if export_type == 'transfer':
         # Transfer: has transfer_from AND transfer_bottles > 0
         items = order_list.items.select_related("product", "transfer_from").filter(
@@ -2594,12 +2588,9 @@ def weekly_export_custom(request, list_id):
         ).order_by("transfer_from__number", "product__name")
         columns = ["Product #", "Product Name", "From", "Bottles"]
     else:
-        # Joe/BT/SQW: respective field > 0
+        # Joe/BT/SQW: include any item where that column > 0 (supplier agnostic)
         filter_kwargs = {f"{export_type}__gt": 0}
         items = order_list.items.select_related("product").filter(**filter_kwargs)
-        supplier_q = supplier_filters.get(export_type)
-        if supplier_q:
-            items = items.filter(supplier_q)
         items = items.order_by("product__name")
         columns = ["Product Name", "Barcode", export_type.upper()]
 
