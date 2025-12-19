@@ -17,6 +17,8 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 from django.contrib.auth import views as auth_views
+from django.templatetags.static import static
+from django.views.generic.base import RedirectView
 from django_ratelimit.decorators import ratelimit
 from inventory import views as inventory_views
 
@@ -36,6 +38,7 @@ def rate_limited_login(request, *args, **kwargs):
     return auth_views.LoginView.as_view(template_name="inventory/login.html")(request, *args, **kwargs)
 
 urlpatterns = [
+    path("favicon.ico", RedirectView.as_view(url=static("inventory/img/favicon.svg"), permanent=True)),
     path("accounts/login/", rate_limited_login, name="login"),
     path("accounts/logout/", inventory_views.logout_view, name="logout"),
     path("", include("inventory.urls", namespace="inventory")),

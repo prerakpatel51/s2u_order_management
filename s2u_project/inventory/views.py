@@ -1483,10 +1483,13 @@ def weekly_list_create(request):
 @login_required
 def weekly_list_detail(request, list_id):
     """View to display and manage a weekly order list."""
-    from django.shortcuts import get_object_or_404
+    from django.shortcuts import redirect
     from .models import WeeklyOrderList
 
-    order_list = get_object_or_404(WeeklyOrderList, pk=list_id)
+    order_list = WeeklyOrderList.objects.filter(pk=list_id).first()
+    if not order_list:
+        messages.warning(request, f"Weekly list {list_id} not found.")
+        return redirect("inventory:weekly_list_create")
 
     is_admin = bool(request.user.is_staff)
     can_edit = (order_list.finalized_at is None) or is_admin

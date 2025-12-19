@@ -22,7 +22,7 @@ cmds = [
 
 [start]
 # Don’t import <pkg>.wsgi directly; call Django’s loader instead.
-cmd = "gunicorn --chdir /app django.core.wsgi:get_wsgi_application --bind 0.0.0.0:$PORT"
+cmd = "gunicorn --chdir /app django.core.wsgi:get_wsgi_application --bind 0.0.0.0:$PORT --timeout 3600 --graceful-timeout 30 --keep-alive 5"
 
 [variables]
 # Set this to whatever manage.py uses.
