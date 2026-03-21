@@ -12,6 +12,32 @@
     border-radius: 20px;
     box-shadow: 0 24px 44px -34px rgba(15, 23, 42, 0.28);
   }
+  .bulk-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+  .bulk-summary-card {
+    min-width: 180px;
+    padding: 0.85rem 1rem;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+    border: 1px solid rgba(191, 219, 254, 0.9);
+  }
+  .bulk-summary-card .label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+  }
+  .bulk-summary-card .value {
+    display: block;
+    margin-top: 0.2rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #1d4ed8;
+  }
   .bulk-table-wrap {
     border-radius: 18px;
     overflow: auto;
@@ -139,6 +165,19 @@
   .suggestion-box .list-group-item {
     cursor: pointer;
   }
+  .bulk-search-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+  .bulk-search-shell {
+    flex: 1 1 560px;
+    min-width: 280px;
+  }
+  .bulk-search-row .btn {
+    min-height: 58px;
+  }
   .store-metric {
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -179,7 +218,7 @@
               </a>
               <button type="button" id="refresh-monthly" class="btn btn-outline-primary">
                 <span class="spinner-border spinner-border-sm me-2 d-none" id="refresh-monthly-spin" role="status"></span>
-                <i class="bi bi-lightning-charge me-1"></i>Refresh Monthly Needed
+                <span id="refresh-monthly-label"><i class="bi bi-lightning-charge me-1"></i>Refresh Monthly Needed</span>
               </button>
               <a class="btn btn-outline-success" href="{% url 'inventory:bulk_order_export_excel' order_list.id %}" target="_blank">
                 <i class="bi bi-file-earmark-excel me-1"></i>Excel
@@ -202,17 +241,34 @@
             </div>
           </div>
 
+          <div class="bulk-summary">
+            <div class="bulk-summary-card">
+              <span class="label">Products</span>
+              <span class="value" id="bulk-total-products">0</span>
+            </div>
+            <div class="bulk-summary-card">
+              <span class="label">Total Cases Across List</span>
+              <span class="value" id="bulk-total-cases">0</span>
+            </div>
+          </div>
+
           <div class="mt-4">
             <label for="bulk-product-query" class="form-label fw-semibold text-uppercase small text-secondary">Add Products</label>
-            <div class="position-relative">
-              <div class="input-group input-group-lg shadow-sm">
-                <span class="input-group-text bg-white border-end-0"><i class="bi bi-upc-scan"></i></span>
-                <input type="text" id="bulk-product-query" class="form-control border-start-0" placeholder="Scan a barcode or type a product name">
+            <div class="bulk-search-row">
+              <div class="position-relative bulk-search-shell">
+                <div class="input-group input-group-lg shadow-sm">
+                  <span class="input-group-text bg-white border-end-0"><i class="bi bi-upc-scan"></i></span>
+                  <input type="text" id="bulk-product-query" class="form-control border-start-0" placeholder="Scan a barcode or type a product name">
+                </div>
+                <div id="bulk-suggestion-box" class="suggestion-box hidden">
+                  <div class="list-group shadow" id="bulk-suggestion-list"></div>
+                </div>
               </div>
-              <div id="bulk-suggestion-box" class="suggestion-box hidden">
-                <div class="list-group shadow" id="bulk-suggestion-list"></div>
-              </div>
+              <button type="button" id="bulk-camera-scan-btn" class="btn btn-outline-primary btn-lg">
+                <i class="bi bi-camera-video me-2"></i>Camera Scan
+              </button>
             </div>
+            <div class="form-text mt-2">Use search for typing or scanning, and camera scan for handheld barcode capture.</div>
           </div>
         </div>
       </div>
@@ -225,6 +281,7 @@
             <tr>
               <th class="numeric">Product #</th>
               <th class="truncate">Product</th>
+              <th>Total Cases</th>
               {% for store in stores %}
               <th class="store-head {% if forloop.first %}store-start{% endif %}">{{ store.number }}</th>
               {% endfor %}
@@ -236,6 +293,34 @@
       </div>
       <div id="bulk-order-empty" class="alert alert-light border-start border-4 border-primary-subtle mt-3 d-none">
         <i class="bi bi-info-circle me-2"></i>Add products to start building this bulk order.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="bulkScanModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-camera-video me-2"></i>Camera Scan</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="bulk-scan-unsupported" class="alert alert-warning d-none"></div>
+        <div id="bulk-scan-feedback" class="alert d-none mb-3"></div>
+        <div class="ratio ratio-16x9 border rounded bg-dark">
+          <video id="bulk-scan-video" class="w-100 h-100" autoplay muted playsinline></video>
+        </div>
+        <div class="mt-3 d-none" id="bulk-scan-zoom-wrapper">
+          <label for="bulk-scan-zoom-range" class="form-label small mb-1">Zoom</label>
+          <input type="range" class="form-range" id="bulk-scan-zoom-range" min="1" max="2" step="0.1" value="1">
+        </div>
+        <p class="small text-muted mt-2 mb-0">Point the camera at a barcode. A matched product will be added to the bulk order immediately.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="bulk-scan-stop" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+          <i class="bi bi-stop-circle me-1"></i>Stop
+        </button>
       </div>
     </div>
   </div>
@@ -257,13 +342,35 @@
   const suggestionList = document.getElementById('bulk-suggestion-list');
   const refreshBtn = document.getElementById('refresh-monthly');
   const refreshSpin = document.getElementById('refresh-monthly-spin');
+  const refreshLabel = document.getElementById('refresh-monthly-label');
+  const totalProductsEl = document.getElementById('bulk-total-products');
+  const totalCasesEl = document.getElementById('bulk-total-cases');
+  const cameraScanBtn = document.getElementById('bulk-camera-scan-btn');
+  const scanModalEl = document.getElementById('bulkScanModal');
+  const scanVideo = document.getElementById('bulk-scan-video');
+  const scanUnsupported = document.getElementById('bulk-scan-unsupported');
+  const scanFeedback = document.getElementById('bulk-scan-feedback');
+  const scanStopBtn = document.getElementById('bulk-scan-stop');
+  const scanZoomWrapper = document.getElementById('bulk-scan-zoom-wrapper');
+  const scanZoomRange = document.getElementById('bulk-scan-zoom-range');
   const addUrl = "{% url 'inventory:bulk_order_add_item' order_list.id %}";
   const updateUrlTemplate = "{% url 'inventory:bulk_order_update_item' order_list.id 987654 %}";
   const deleteUrlTemplate = "{% url 'inventory:bulk_order_delete_item' order_list.id 987654 %}";
   const monthlyUrl = "{% url 'inventory:monthly_sales_bulk_api' %}";
+  const monthlyRefreshStartUrl = "{% url 'inventory:bulk_order_monthly_refresh_start' order_list.id %}";
+  const monthlyRefreshStatusUrl = "{% url 'inventory:bulk_order_monthly_refresh_status' %}";
   const csrfToken = document.querySelector('input[name=csrfmiddlewaretoken]')?.value || '';
   const saveTimers = new Map();
   let suggestions = [];
+  let activeMonthlyJob = null;
+  let scanDetector = null;
+  let scanStream = null;
+  let scanTrack = null;
+  let scanActive = false;
+  let zxingReader = null;
+  let zxingActive = false;
+  let lastScanValue = '';
+  let lastScanAt = 0;
 
   function escapeHtml(value) {
     return String(value || '')
@@ -290,6 +397,16 @@
 
   function setStoreData(item, storeId, data) {
     item.stores[String(storeId)] = data;
+  }
+
+  function getItemTotalCases(item) {
+    return stores.reduce((sum, store) => sum + Number(getStoreData(item, store.id).cases_to_order || 0), 0);
+  }
+
+  function renderSummary() {
+    totalProductsEl.textContent = String(items.length);
+    const totalCases = items.reduce((sum, item) => sum + getItemTotalCases(item), 0);
+    totalCasesEl.textContent = String(totalCases);
   }
 
   function renderRows() {
@@ -332,6 +449,7 @@
           <td class="truncate">
             <div class="fw-semibold">${escapeHtml(item.product_name)}</div>
           </td>
+          <td class="text-center numeric fw-semibold">${getItemTotalCases(item)}</td>
           ${storeCells}
           <td class="text-center action-cell">
             <button type="button" class="btn btn-sm btn-outline-danger bulk-delete" data-item-id="${item.id}">
@@ -352,6 +470,12 @@
         const data = getStoreData(item, storeId);
         data.cases_to_order = next;
         setStoreData(item, storeId, data);
+        const row = input.closest('tr');
+        if (row) {
+          const totalCell = row.children[2];
+          if (totalCell) totalCell.textContent = String(getItemTotalCases(item));
+        }
+        renderSummary();
         queueSave(itemId);
       });
     });
@@ -369,6 +493,8 @@
         renderRows();
       });
     });
+
+    renderSummary();
   }
 
   async function saveItem(itemId) {
@@ -491,6 +617,233 @@
     }
   }
 
+  async function pollMonthlyJob(jobId) {
+    activeMonthlyJob = jobId;
+    refreshSpin.classList.remove('d-none');
+    refreshBtn.disabled = true;
+
+    try {
+      while (true) {
+        const response = await fetch(`${monthlyRefreshStatusUrl}?job=${encodeURIComponent(jobId)}`);
+        if (!response.ok) break;
+        const data = await response.json();
+        if (!data.ok) break;
+        if (data.message) {
+          refreshLabel.textContent = data.message;
+        }
+        if (data.done) {
+          await refreshMonthly(false);
+          break;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+      }
+    } finally {
+      activeMonthlyJob = null;
+      refreshBtn.disabled = false;
+      refreshSpin.classList.add('d-none');
+      refreshLabel.innerHTML = '<i class="bi bi-lightning-charge me-1"></i>Refresh Monthly Needed';
+    }
+  }
+
+  async function startMonthlyRefresh() {
+    if (activeMonthlyJob || !items.length) return;
+    const response = await fetch(monthlyRefreshStartUrl, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': csrfToken },
+    });
+    if (response.status === 409) {
+      return;
+    }
+    if (!response.ok) return;
+    const data = await response.json();
+    if (data.ok && data.job) {
+      pollMonthlyJob(data.job);
+    }
+  }
+
+  async function requestCameraPermission() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+    try {
+      const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      tmp.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      if (scanUnsupported) {
+        scanUnsupported.textContent = 'Camera permission denied: ' + (err.message || '');
+        scanUnsupported.classList.remove('d-none');
+      }
+    }
+  }
+
+  function showScanFeedback(type, message, autoHide = true) {
+    if (!scanFeedback) return;
+    const classes = {
+      success: 'alert-success',
+      danger: 'alert-danger',
+      warning: 'alert-warning',
+      info: 'alert-info',
+    };
+    scanFeedback.className = 'alert mb-3 ' + (classes[type] || classes.info);
+    scanFeedback.innerHTML = message;
+    scanFeedback.classList.remove('d-none');
+    if (autoHide) {
+      window.setTimeout(() => scanFeedback.classList.add('d-none'), 3000);
+    }
+  }
+
+  async function ensureZxingLoaded() {
+    if (window.ZXing) return;
+    await new Promise((resolve, reject) => {
+      const existing = document.getElementById('bulk-zxing-lib');
+      if (existing) {
+        existing.addEventListener('load', resolve, { once: true });
+        existing.addEventListener('error', reject, { once: true });
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js';
+      script.id = 'bulk-zxing-lib';
+      script.async = true;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+
+  async function handleScannedBarcode(raw) {
+    const query = String(raw || '').trim();
+    if (!query) return;
+    try {
+      const response = await fetch(`{% url 'inventory:product_search_api' %}?q=${encodeURIComponent(query)}&page_size=8`);
+      if (!response.ok) throw new Error('Search failed');
+      const data = await response.json();
+      const pool = [...(data.matches || []), ...(data.suggestions || [])];
+      if (!pool.length) {
+        showScanFeedback('warning', `No products found for <strong>${escapeHtml(query)}</strong>.`);
+        return;
+      }
+      let chosen = pool.find((p) => p.barcode && p.barcode === query) || null;
+      if (!chosen) {
+        chosen = pool.find((p) => Array.isArray(p.barcodes) && p.barcodes.includes(query)) || null;
+      }
+      if (!chosen) chosen = pool[0];
+      await addProduct(Number(chosen.number));
+      showScanFeedback('success', `Added <strong>${escapeHtml(chosen.name)}</strong>.`);
+    } catch (err) {
+      showScanFeedback('danger', err.message || 'Unable to scan product.');
+    }
+  }
+
+  async function startZxingScan() {
+    try {
+      await ensureZxingLoaded();
+      if (!window.ZXing || !ZXing.BrowserMultiFormatReader) throw new Error('ZXing failed to load');
+      if (!zxingReader) zxingReader = new ZXing.BrowserMultiFormatReader();
+      scanStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+      scanTrack = (scanStream.getVideoTracks && scanStream.getVideoTracks()[0]) || null;
+      scanVideo.srcObject = scanStream;
+      await scanVideo.play();
+      const settings = scanTrack && typeof scanTrack.getSettings === 'function' ? scanTrack.getSettings() : {};
+      zxingActive = true;
+      await zxingReader.decodeFromVideoDevice(settings.deviceId || null, scanVideo, (result) => {
+        if (!zxingActive || !result) return;
+        const raw = (result.getText && result.getText()) || '';
+        const now = Date.now();
+        if (!raw || (raw === lastScanValue && now - lastScanAt < 1500)) return;
+        lastScanValue = raw;
+        lastScanAt = now;
+        handleScannedBarcode(raw);
+      });
+    } catch (err) {
+      if (scanUnsupported) {
+        scanUnsupported.textContent = 'Unable to start fallback decoder: ' + (err.message || '');
+        scanUnsupported.classList.remove('d-none');
+      }
+    }
+  }
+
+  async function scanLoop() {
+    if (!scanActive || !scanDetector || !scanVideo || scanVideo.readyState < 2) {
+      if (scanActive) window.requestAnimationFrame(scanLoop);
+      return;
+    }
+    try {
+      const barcodes = await scanDetector.detect(scanVideo);
+      if (Array.isArray(barcodes) && barcodes.length > 0) {
+        const raw = (barcodes[0].rawValue || '').trim();
+        const now = Date.now();
+        if (raw && !(raw === lastScanValue && now - lastScanAt < 1500)) {
+          lastScanValue = raw;
+          lastScanAt = now;
+          await handleScannedBarcode(raw);
+        }
+      }
+    } catch (_) {}
+    if (scanActive) window.requestAnimationFrame(scanLoop);
+  }
+
+  async function startCameraScan() {
+    if (!scanVideo || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (scanUnsupported) scanUnsupported.classList.remove('d-none');
+      return;
+    }
+    if ('BarcodeDetector' in window) {
+      try {
+        scanDetector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'] });
+      } catch (_) {
+        scanDetector = null;
+      }
+    }
+    if (scanDetector) {
+      try {
+        if (scanUnsupported) scanUnsupported.classList.add('d-none');
+        scanStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        });
+        scanTrack = (scanStream.getVideoTracks && scanStream.getVideoTracks()[0]) || null;
+        scanVideo.srcObject = scanStream;
+        await scanVideo.play();
+        if (scanZoomWrapper && scanZoomRange) {
+          scanZoomWrapper.classList.remove('d-none');
+          scanZoomRange.oninput = () => {
+            const v = Number(scanZoomRange.value) || 1;
+            scanVideo.style.transformOrigin = 'center center';
+            scanVideo.style.objectFit = 'cover';
+            scanVideo.style.transform = `scale(${v})`;
+          };
+        }
+        scanActive = true;
+        window.requestAnimationFrame(scanLoop);
+        return;
+      } catch (_) {}
+    }
+    startZxingScan();
+  }
+
+  function stopCameraScan() {
+    scanActive = false;
+    if (scanStream) {
+      try { scanStream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+      scanStream = null;
+    }
+    scanTrack = null;
+    if (scanVideo) {
+      try { scanVideo.srcObject = null; } catch (_) {}
+      scanVideo.style.transform = '';
+    }
+    if (zxingReader) {
+      try { zxingReader.reset(); } catch (_) {}
+    }
+    zxingActive = false;
+    if (scanZoomWrapper && scanZoomRange) {
+      scanZoomWrapper.classList.add('d-none');
+      scanZoomRange.oninput = null;
+    }
+  }
+
   queryInput.addEventListener('input', () => {
     window.clearTimeout(queryInput._searchTimer);
     queryInput._searchTimer = window.setTimeout(() => searchProducts(queryInput.value.trim()), 180);
@@ -511,7 +864,24 @@
     }
   });
 
-  refreshBtn.addEventListener('click', () => refreshMonthly(true));
+  refreshBtn.addEventListener('click', () => startMonthlyRefresh());
+
+  if (cameraScanBtn && scanModalEl) {
+    const scanModal = new bootstrap.Modal(scanModalEl);
+    cameraScanBtn.addEventListener('click', () => {
+      requestCameraPermission().finally(() => scanModal.show());
+    });
+    scanModalEl.addEventListener('shown.bs.modal', () => {
+      if (scanFeedback) scanFeedback.classList.add('d-none');
+      startCameraScan();
+    });
+    scanModalEl.addEventListener('hidden.bs.modal', () => {
+      stopCameraScan();
+    });
+    if (scanStopBtn) {
+      scanStopBtn.addEventListener('click', () => scanModal.hide());
+    }
+  }
 
   renderRows();
   if (items.length) {

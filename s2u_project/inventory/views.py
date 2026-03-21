@@ -1519,6 +1519,88 @@ def _serialize_bulk_order_items(order_list: BulkOrderList, stores: list[Store]) 
     return rows
 
 
+def _bulk_order_monthly_job_key(job_id: str) -> str:
+    return f"bulk_order_monthly:{job_id}"
+
+
+def _bulk_order_monthly_lock_key(list_id: int) -> str:
+    return f"bulk_order_monthly:lock:{list_id}"
+
+
+def _update_bulk_order_monthly_job(job_id: str, payload: Dict) -> None:
+    current = redis_get_json(_bulk_order_monthly_job_key(job_id), {}) or {}
+    current.update(payload)
+    redis_set_json(_bulk_order_monthly_job_key(job_id), current, ex=3600)
+
+
+def _run_bulk_order_monthly_refresh(job_id: str, list_id: int) -> None:
+    try:
+        order_list = BulkOrderList.objects.get(pk=list_id)
+        items = list(order_list.items.select_related("product").all())
+        stores = [store for store in _active_bulk_order_stores() if store.korona_id]
+        total = len(items)
+        if not total or not stores:
+            _update_bulk_order_monthly_job(
+                job_id,
+                {"step": "done", "progress": 100, "done": True, "message": "Nothing to refresh."},
+            )
+            return
+
+        from .korona import calculate_monthly_sales_bulk
+
+        _update_bulk_order_monthly_job(
+            job_id,
+            {"step": "monthly", "progress": 5, "done": False, "message": f"Refreshing monthly-needed for {total} products..."},
+        )
+
+        for idx, item in enumerate(items, start=1):
+            product = item.product
+            if not product.korona_id:
+                continue
+            sales = calculate_monthly_sales_bulk(
+                str(product.korona_id),
+                [(store.id, str(store.korona_id)) for store in stores],
+                days=30,
+            )
+            for store in stores:
+                qty = int(sales.get(store.id, 0))
+                MonthlySales.objects.update_or_create(
+                    product=product,
+                    store=store,
+                    defaults={"quantity_sold": qty, "days_calculated": 30},
+                )
+                try:
+                    redis_client.set(f"monthly_sales:{product.number}:{store.id}", qty, ex=3600)
+                except Exception:
+                    pass
+
+            pct = min(100, 5 + int((idx / max(1, total)) * 95))
+            _update_bulk_order_monthly_job(
+                job_id,
+                {
+                    "step": "monthly",
+                    "progress": pct,
+                    "done": False,
+                    "message": f"Refreshing monthly-needed... {idx}/{total}",
+                },
+            )
+
+        _update_bulk_order_monthly_job(
+            job_id,
+            {"step": "done", "progress": 100, "done": True, "message": "Monthly-needed refresh complete."},
+        )
+    except Exception as exc:
+        _update_bulk_order_monthly_job(
+            job_id,
+            {"step": "error", "progress": 100, "done": True, "error": str(exc), "message": f"Failed: {exc}"},
+        )
+    finally:
+        try:
+            redis_delete(_bulk_order_monthly_lock_key(list_id))
+        except Exception:
+            pass
+
+
 @login_required
 @user_passes_test(_staff_required)
 def bulk_order_index(request):
@@ -1729,6 +1811,49 @@ def bulk_order_delete_list(request, list_id: int):
     return redirect("inventory:bulk_order_index")
 
 
+@ratelimit(key='user_or_ip', rate='10/m', method='POST', block=True)
+@login_required
+@user_passes_test(_staff_required)
+def bulk_order_monthly_refresh_start(request, list_id: int):
+    """Start a background monthly-needed refresh for one bulk-order list."""
+    from django.shortcuts import get_object_or_404
+
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
+
+    get_object_or_404(BulkOrderList, pk=list_id)
+    try:
+        if not redis_setnx(_bulk_order_monthly_lock_key(list_id), request.user.id, ex=3600):
+            return JsonResponse({"ok": False, "error": "Refresh already running for this bulk order."}, status=409)
+    except Exception:
+        pass
+
+    job_id = uuid.uuid4().hex
+    redis_set_json(
+        _bulk_order_monthly_job_key(job_id),
+        {"step": "queued", "progress": 0, "done": False, "list_id": list_id},
+        ex=3600,
+    )
+    t = threading.Thread(target=_run_bulk_order_monthly_refresh, args=(job_id, list_id), daemon=True)
+    t.start()
+    return JsonResponse({"ok": True, "job": job_id})
+
+
+@ratelimit(key='user_or_ip', rate='120/m', method='GET', block=True)
+@login_required
+@user_passes_test(_staff_required)
+@require_GET
+def bulk_order_monthly_refresh_status(request):
+    """Return status for a background bulk-order monthly refresh job."""
+    job_id = (request.GET.get("job") or "").strip()
+    if not job_id:
+        return JsonResponse({"ok": False, "error": "Missing job id"}, status=400)
+    data = redis_get_json(_bulk_order_monthly_job_key(job_id))
+    if not data:
+        return JsonResponse({"ok": False, "error": "Job not found"}, status=404)
+    return JsonResponse({"ok": True, **data})
+
+
 @login_required
 @user_passes_test(_staff_required)
 def bulk_order_export_excel(request, list_id: int):
@@ -1827,7 +1952,7 @@ def bulk_order_export_pdf(request, list_id: int):
             table_row.append(P(int(store_values.get("cases_to_order", 0))))
         table_rows.append(table_row)
 
-    col_widths = [2.8 * inch, 1.5 * inch] + [0.85 * inch for _ in stores]
+    col_widths = [3.0 * inch, 1.15 * inch] + [0.72 * inch for _ in stores]
     table = Table(table_rows, colWidths=col_widths, repeatRows=1)
     table.setStyle(
         TableStyle(
