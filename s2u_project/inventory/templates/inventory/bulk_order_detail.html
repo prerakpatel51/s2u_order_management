@@ -18,11 +18,16 @@
     box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.9);
     background: #fff;
   }
-  .bulk-table {
-    min-width: 1220px;
+  #bulk-items-table {
+    --w-num: 78px;
+    --w-name: 240px;
+    --w-barcode: 140px;
+    --w-supplier: 96px;
+    --w-action: 88px;
+    min-width: 1240px;
     margin-bottom: 0;
   }
-  .bulk-table thead th {
+  #bulk-items-table thead th {
     text-transform: uppercase;
     font-size: 0.72rem;
     letter-spacing: 0.05em;
@@ -30,42 +35,80 @@
     text-align: center;
     vertical-align: middle;
   }
-  .bulk-table thead .store-head {
-    background: #eef4ff;
-    color: #1d4ed8;
+  #bulk-items-table thead tr:last-child th {
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 5;
+    box-shadow: 0 -1px 0 #e9ecef inset, 0 2px 0 rgba(0, 0, 0, 0.02);
   }
-  .bulk-table thead .store-sub {
-    background: #f8fafc;
-  }
-  .bulk-table tbody td {
-    vertical-align: middle;
-  }
-  .bulk-table tbody td:nth-child(1),
-  .bulk-table tbody td:nth-child(2) {
+  #bulk-items-table thead th:nth-child(1),
+  #bulk-items-table tbody tr > *:nth-child(1) {
     position: sticky;
     left: 0;
+    z-index: 6;
     background: #fff;
-    z-index: 2;
+    min-width: var(--w-num);
+    max-width: var(--w-num);
   }
-  .bulk-table tbody td:nth-child(2) {
-    left: 90px;
-    min-width: 240px;
-    box-shadow: 8px 0 12px -12px rgba(15, 23, 42, 0.24);
-  }
-  .bulk-table thead tr th:nth-child(1),
-  .bulk-table thead tr th:nth-child(2) {
+  #bulk-items-table thead th:nth-child(2),
+  #bulk-items-table tbody tr > *:nth-child(2) {
     position: sticky;
+    left: var(--w-num);
+    z-index: 6;
+    background: #fff;
+    min-width: var(--w-name);
+    max-width: var(--w-name);
+    box-shadow: 6px 0 6px -6px rgba(0, 0, 0, 0.08);
+  }
+  #bulk-items-table thead th:nth-child(3),
+  #bulk-items-table tbody tr > *:nth-child(3) {
+    min-width: var(--w-barcode);
+    max-width: var(--w-barcode);
+  }
+  #bulk-items-table thead th:nth-child(4),
+  #bulk-items-table tbody tr > *:nth-child(4) {
+    min-width: var(--w-supplier);
+    max-width: var(--w-supplier);
+  }
+  #bulk-items-table thead th.action-col,
+  #bulk-items-table tbody td.action-cell {
+    position: sticky;
+    right: 0;
     z-index: 4;
     background: #fff;
+    min-width: var(--w-action);
+    box-shadow: -6px 0 6px -6px rgba(0, 0, 0, 0.08);
   }
-  .bulk-table thead tr th:nth-child(1) {
-    left: 0;
-    min-width: 90px;
+  #bulk-items-table td.truncate,
+  #bulk-items-table th.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .bulk-table thead tr th:nth-child(2) {
-    left: 90px;
-    min-width: 240px;
-    box-shadow: 8px 0 12px -12px rgba(15, 23, 42, 0.24);
+  #bulk-items-table td.numeric,
+  #bulk-items-table th.numeric {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  #bulk-items-table th.store-head {
+    background: #eef6ff;
+    color: #1d4ed8;
+  }
+  #bulk-items-table th.store-sub {
+    background: #f8fafc;
+  }
+  #bulk-items-table th.store-start,
+  #bulk-items-table td.store-start {
+    border-left: 2px solid #e9ecef;
+  }
+  #bulk-items-table th,
+  #bulk-items-table td {
+    border-left: 1px solid #cbd5e1;
+    border-right: 1px solid #cbd5e1;
+  }
+  #bulk-items-table tbody td:nth-child(2) {
+    font-size: 0.9rem;
   }
   .suggestion-box {
     position: absolute;
@@ -92,12 +135,11 @@
     text-align: center;
   }
   @media (max-width: 768px) {
-    .bulk-table tbody td:nth-child(1),
-    .bulk-table tbody td:nth-child(2),
-    .bulk-table thead tr th:nth-child(1),
-    .bulk-table thead tr th:nth-child(2) {
+    #bulk-items-table thead tr th,
+    #bulk-items-table tbody td {
       position: static;
       left: auto;
+      right: auto;
       box-shadow: none;
     }
   }
@@ -163,21 +205,21 @@
 
     <div class="col-12">
       <div class="bulk-table-wrap">
-        <table class="table table-sm align-middle bulk-table">
+        <table class="table table-hover table-striped table-sm align-middle" id="bulk-items-table">
           <thead>
             <tr>
-              <th rowspan="2">Product #</th>
-              <th rowspan="2">Product</th>
+              <th rowspan="2" class="numeric">Product #</th>
+              <th rowspan="2" class="truncate">Product</th>
               <th rowspan="2">Barcode</th>
-              <th rowspan="2">Supplier</th>
+              <th rowspan="2">Sup</th>
               {% for store in stores %}
               <th colspan="3" class="store-head">{{ store.number }}</th>
               {% endfor %}
-              <th rowspan="2">Actions</th>
+              <th rowspan="2" class="action-col">Remove</th>
             </tr>
             <tr>
               {% for store in stores %}
-              <th class="store-sub">Stock</th>
+              <th class="store-sub store-start">Stock</th>
               <th class="store-sub">Monthly</th>
               <th class="store-sub">Cases</th>
               {% endfor %}
@@ -257,8 +299,8 @@
       const storeCells = stores.map((store) => {
         const data = getStoreData(item, store.id);
         return `
-          <td class="text-center store-metric">${Number(data.stock || 0).toFixed(2)}</td>
-          <td class="text-center store-metric"><span class="badge text-bg-light border">${Number(data.monthly_needed || 0)}</span></td>
+          <td class="text-center store-metric numeric store-start">${Number(data.stock || 0).toFixed(2)}</td>
+          <td class="text-center store-metric numeric"><span class="badge text-bg-light border">${Number(data.monthly_needed || 0)}</span></td>
           <td class="text-center">
             <input
               type="number"
@@ -274,15 +316,15 @@
 
       return `
         <tr data-item-id="${item.id}">
-          <td>${escapeHtml(item.product_number)}</td>
-          <td>
+          <td class="numeric">${escapeHtml(item.product_number)}</td>
+          <td class="truncate">
             <div class="fw-semibold">${escapeHtml(item.product_name)}</div>
             <div class="small text-muted">${escapeHtml(item.supplier_name || '—')}</div>
           </td>
-          <td>${escapeHtml((item.barcodes && item.barcodes[0]) || item.barcode || '—')}</td>
-          <td>${escapeHtml(item.supplier_name || '—')}</td>
+          <td class="truncate">${escapeHtml((item.barcodes && item.barcodes[0]) || item.barcode || '—')}</td>
+          <td class="text-center">${escapeHtml(item.supplier_name || '—')}</td>
           ${storeCells}
-          <td class="text-center">
+          <td class="text-center action-cell">
             <button type="button" class="btn btn-sm btn-outline-danger bulk-delete" data-item-id="${item.id}">
               <i class="bi bi-trash"></i>
             </button>
@@ -405,7 +447,7 @@
       renderRows();
       renderSuggestions([]);
       queryInput.value = '';
-      await refreshMonthly(true, [productNumber]);
+      refreshMonthly(false, [productNumber]);
     }
   }
 
