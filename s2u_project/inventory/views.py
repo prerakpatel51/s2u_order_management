@@ -1746,15 +1746,9 @@ def bulk_order_export_excel(request, list_id: int):
     ws = wb.active
     ws.title = "Bulk Order"
 
-    headers = ["Product #", "Product Name", "Barcode", "Supplier"]
+    headers = ["Product Name", "Barcode"]
     for store in stores:
-        headers.extend(
-            [
-                f"{store.number} Stock",
-                f"{store.number} Monthly",
-                f"{store.number} Cases",
-            ]
-        )
+        headers.append(f"{store.number} Cases")
 
     max_cols = max(1, len(headers))
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_cols)
@@ -1773,24 +1767,16 @@ def bulk_order_export_excel(request, list_id: int):
 
     for row in rows:
         values = [
-            row["product_number"],
             row["product_name"],
             row["barcode"] or "",
-            row["supplier_name"] or "",
         ]
         for store in stores:
             store_values = row["stores"].get(store.id, {})
-            values.extend(
-                [
-                    float(store_values.get("stock", 0)),
-                    int(store_values.get("monthly_needed", 0)),
-                    int(store_values.get("cases_to_order", 0)),
-                ]
-            )
+            values.append(int(store_values.get("cases_to_order", 0)))
         ws.append(values)
 
     ws.freeze_panes = ws["A5"]
-    widths = {1: 12, 2: 28, 3: 16, 4: 22}
+    widths = {1: 32, 2: 18}
     for idx in range(1, max_cols + 1):
         ws.column_dimensions[get_column_letter(idx)].width = widths.get(idx, 12)
 
@@ -1829,26 +1815,19 @@ def bulk_order_export_pdf(request, list_id: int):
     def P(text):
         return Paragraph(str(text) if text not in (None, "") else "—", cell_style)
 
-    table_headers = ["Product #", "Product Name", "Barcode", "Supplier"] + [store.number for store in stores]
+    table_headers = ["Product Name", "Barcode"] + [store.number for store in stores]
     table_rows = [table_headers]
     for row in rows:
         table_row = [
-            P(row["product_number"]),
             P(row["product_name"]),
             P(row["barcode"] or "—"),
-            P(row["supplier_name"] or "—"),
         ]
         for store in stores:
             store_values = row["stores"].get(store.id, {})
-            cell_text = (
-                f"Stock: {float(store_values.get('stock', 0)):.2f}<br/>"
-                f"Monthly: {int(store_values.get('monthly_needed', 0))}<br/>"
-                f"Cases: {int(store_values.get('cases_to_order', 0))}"
-            )
-            table_row.append(P(cell_text))
+            table_row.append(P(int(store_values.get("cases_to_order", 0))))
         table_rows.append(table_row)
 
-    col_widths = [0.8 * inch, 2.2 * inch, 1.2 * inch, 1.6 * inch] + [1.1 * inch for _ in stores]
+    col_widths = [2.8 * inch, 1.5 * inch] + [0.85 * inch for _ in stores]
     table = Table(table_rows, colWidths=col_widths, repeatRows=1)
     table.setStyle(
         TableStyle(

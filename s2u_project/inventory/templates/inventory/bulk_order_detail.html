@@ -20,11 +20,9 @@
   }
   #bulk-items-table {
     --w-num: 78px;
-    --w-name: 240px;
-    --w-barcode: 140px;
-    --w-supplier: 96px;
+    --w-name: 280px;
     --w-action: 88px;
-    min-width: 1240px;
+    min-width: 1080px;
     margin-bottom: 0;
   }
   #bulk-items-table thead th {
@@ -61,16 +59,6 @@
     max-width: var(--w-name);
     box-shadow: 6px 0 6px -6px rgba(0, 0, 0, 0.08);
   }
-  #bulk-items-table thead th:nth-child(3),
-  #bulk-items-table tbody tr > *:nth-child(3) {
-    min-width: var(--w-barcode);
-    max-width: var(--w-barcode);
-  }
-  #bulk-items-table thead th:nth-child(4),
-  #bulk-items-table tbody tr > *:nth-child(4) {
-    min-width: var(--w-supplier);
-    max-width: var(--w-supplier);
-  }
   #bulk-items-table thead th.action-col,
   #bulk-items-table tbody td.action-cell {
     position: sticky;
@@ -91,12 +79,9 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
-  #bulk-items-table th.store-head {
+  #bulk-items-table th.store-head,
+  #bulk-items-table td.store-cell {
     background: #eef6ff;
-    color: #1d4ed8;
-  }
-  #bulk-items-table th.store-sub {
-    background: #f8fafc;
   }
   #bulk-items-table th.store-start,
   #bulk-items-table td.store-start {
@@ -109,6 +94,35 @@
   }
   #bulk-items-table tbody td:nth-child(2) {
     font-size: 0.9rem;
+  }
+  .store-head {
+    color: #1d4ed8;
+    min-width: 128px;
+  }
+  .store-stack {
+    display: grid;
+    gap: 0.35rem;
+    min-width: 118px;
+  }
+  .store-kpis {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    line-height: 1.1;
+    color: #475569;
+  }
+  .store-kpis strong {
+    display: block;
+    font-size: 0.88rem;
+    color: #0f172a;
+  }
+  .store-case-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+    text-align: left;
   }
   .suggestion-box {
     position: absolute;
@@ -130,9 +144,10 @@
     white-space: nowrap;
   }
   .case-input {
-    min-width: 74px;
-    max-width: 88px;
+    min-width: 92px;
+    max-width: 96px;
     text-align: center;
+    margin: 0 auto;
   }
   @media (max-width: 768px) {
     #bulk-items-table thead tr th,
@@ -208,21 +223,12 @@
         <table class="table table-hover table-striped table-sm align-middle" id="bulk-items-table">
           <thead>
             <tr>
-              <th rowspan="2" class="numeric">Product #</th>
-              <th rowspan="2" class="truncate">Product</th>
-              <th rowspan="2">Barcode</th>
-              <th rowspan="2">Sup</th>
+              <th class="numeric">Product #</th>
+              <th class="truncate">Product</th>
               {% for store in stores %}
-              <th colspan="3" class="store-head">{{ store.number }}</th>
+              <th class="store-head {% if forloop.first %}store-start{% endif %}">{{ store.number }}</th>
               {% endfor %}
-              <th rowspan="2" class="action-col">Remove</th>
-            </tr>
-            <tr>
-              {% for store in stores %}
-              <th class="store-sub store-start">Stock</th>
-              <th class="store-sub">Monthly</th>
-              <th class="store-sub">Cases</th>
-              {% endfor %}
+              <th class="action-col">Remove</th>
             </tr>
           </thead>
           <tbody id="bulk-order-body"></tbody>
@@ -252,8 +258,8 @@
   const refreshBtn = document.getElementById('refresh-monthly');
   const refreshSpin = document.getElementById('refresh-monthly-spin');
   const addUrl = "{% url 'inventory:bulk_order_add_item' order_list.id %}";
-  const updateUrlTemplate = "{% url 'inventory:bulk_order_update_item' order_list.id 0 %}";
-  const deleteUrlTemplate = "{% url 'inventory:bulk_order_delete_item' order_list.id 0 %}";
+  const updateUrlTemplate = "{% url 'inventory:bulk_order_update_item' order_list.id 987654 %}";
+  const deleteUrlTemplate = "{% url 'inventory:bulk_order_delete_item' order_list.id 987654 %}";
   const monthlyUrl = "{% url 'inventory:monthly_sales_bulk_api' %}";
   const csrfToken = document.querySelector('input[name=csrfmiddlewaretoken]')?.value || '';
   const saveTimers = new Map();
@@ -299,17 +305,23 @@
       const storeCells = stores.map((store) => {
         const data = getStoreData(item, store.id);
         return `
-          <td class="text-center store-metric numeric store-start">${Number(data.stock || 0).toFixed(2)}</td>
-          <td class="text-center store-metric numeric"><span class="badge text-bg-light border">${Number(data.monthly_needed || 0)}</span></td>
-          <td class="text-center">
-            <input
-              type="number"
-              min="0"
-              class="form-control form-control-sm case-input mx-auto"
-              data-item-id="${item.id}"
-              data-store-id="${store.id}"
-              value="${Number(data.cases_to_order || 0)}"
-            >
+          <td class="store-cell ${store.id === (stores[0] ? stores[0].id : null) ? 'store-start' : ''}">
+            <div class="store-stack">
+              <div class="store-kpis">
+                <span>Stock<strong>${Number(data.stock || 0).toFixed(2)}</strong></span>
+                <span>Monthly<strong>${Number(data.monthly_needed || 0)}</strong></span>
+              </div>
+              <label class="store-case-label" for="cases-${item.id}-${store.id}">Cases</label>
+              <input
+                id="cases-${item.id}-${store.id}"
+                type="number"
+                min="0"
+                class="form-control form-control-sm case-input"
+                data-item-id="${item.id}"
+                data-store-id="${store.id}"
+                value="${Number(data.cases_to_order || 0)}"
+              >
+            </div>
           </td>
         `;
       }).join('');
@@ -319,10 +331,7 @@
           <td class="numeric">${escapeHtml(item.product_number)}</td>
           <td class="truncate">
             <div class="fw-semibold">${escapeHtml(item.product_name)}</div>
-            <div class="small text-muted">${escapeHtml(item.supplier_name || '—')}</div>
           </td>
-          <td class="truncate">${escapeHtml((item.barcodes && item.barcodes[0]) || item.barcode || '—')}</td>
-          <td class="text-center">${escapeHtml(item.supplier_name || '—')}</td>
           ${storeCells}
           <td class="text-center action-cell">
             <button type="button" class="btn btn-sm btn-outline-danger bulk-delete" data-item-id="${item.id}">
@@ -351,10 +360,11 @@
       button.addEventListener('click', async () => {
         if (!window.confirm('Remove this product from the bulk order?')) return;
         const itemId = Number(button.dataset.itemId);
-        await fetch(deleteUrlTemplate.replace(/0\/$/, `${itemId}/`), {
+        const response = await fetch(deleteUrlTemplate.replace(/987654/, String(itemId)), {
           method: 'POST',
           headers: { 'X-CSRFToken': csrfToken },
         });
+        if (!response.ok) return;
         items = items.filter((entry) => entry.id !== itemId);
         renderRows();
       });
@@ -369,7 +379,7 @@
       cases[store.id] = Number(getStoreData(item, store.id).cases_to_order || 0);
     });
 
-    const response = await fetch(updateUrlTemplate.replace(/0\/$/, `${itemId}/`), {
+    const response = await fetch(updateUrlTemplate.replace(/987654/, String(itemId)), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
