@@ -28,6 +28,9 @@
         <div class="d-flex flex-wrap gap-2">
           <a class="btn btn-primary" href="{% url 'inventory:weekly_list_create' %}"><i class="bi bi-plus-circle me-2"></i>Create New List</a>
           <a class="btn btn-outline-light" href="{% url 'inventory:product_search' %}"><i class="bi bi-search me-2"></i>Inventory Lookup</a>
+          {% if request.user.is_authenticated and request.user.is_staff %}
+          <a class="btn btn-outline-light" href="{% url 'inventory:bulk_order_index' %}"><i class="bi bi-boxes me-2"></i>Bulk Order</a>
+          {% endif %}
         </div>
       </div>
       <div class="col-12 col-md-5 text-center text-md-end">
@@ -55,6 +58,11 @@
                 <span class="spinner-border spinner-border-sm me-2 d-none" id="refreshAllSpin" role="status" aria-hidden="true"></span>
                 <i class="bi bi-arrow-clockwise me-1"></i>Refresh Data
               </button>
+              {% endif %}
+              {% if request.user.is_staff %}
+              <a class="btn btn-sm btn-outline-secondary" href="{% url 'inventory:bulk_order_index' %}">
+                <i class="bi bi-boxes me-1"></i>Bulk Order
+              </a>
               {% endif %}
               <a class="btn btn-sm btn-primary" href="{% url 'inventory:weekly_list_create' %}"><i class="bi bi-plus-circle me-2"></i>Create New List</a>
             </div>

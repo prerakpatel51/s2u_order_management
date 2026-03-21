@@ -179,3 +179,71 @@ class MonthlySales(models.Model):
         from django.utils import timezone
         from datetime import timedelta
         return timezone.now() - self.calculated_at > timedelta(minutes=30)
+
+
+class BulkOrderList(models.Model):
+    """Admin-maintained saved bulk-order list, typically organized by brand."""
+
+    name = models.CharField(max_length=255, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="bulk_order_lists",
+    )
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class BulkOrderItem(models.Model):
+    """Product row inside a saved bulk-order list."""
+
+    bulk_order = models.ForeignKey(
+        BulkOrderList,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="bulk_order_items",
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("bulk_order", "product")
+        ordering = ["product__name"]
+
+    def __str__(self) -> str:
+        return f"{self.bulk_order.name} - {self.product.name}"
+
+
+class BulkOrderStoreCase(models.Model):
+    """Saved number of cases to order for one bulk-order item at one store."""
+
+    item = models.ForeignKey(
+        BulkOrderItem,
+        on_delete=models.CASCADE,
+        related_name="store_cases",
+    )
+    store = models.ForeignKey(
+        Store,
+        on_delete=models.CASCADE,
+        related_name="bulk_order_store_cases",
+    )
+    cases_to_order = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("item", "store")
+        ordering = ["store__number", "store__name"]
+
+    def __str__(self) -> str:
+        return f"{self.item} @ {self.store.number}: {self.cases_to_order} cases"

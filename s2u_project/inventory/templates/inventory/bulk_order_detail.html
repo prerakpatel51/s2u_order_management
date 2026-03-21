@@ -1,0 +1,470 @@
+{% extends "inventory/base.html" %}
+
+{% block title %}Bulk Order · {{ order_list.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  body {
+    background: linear-gradient(180deg, #f6f9fc 0%, #ffffff 60%);
+  }
+  .bulk-meta-card {
+    border: none;
+    border-radius: 20px;
+    box-shadow: 0 24px 44px -34px rgba(15, 23, 42, 0.28);
+  }
+  .bulk-table-wrap {
+    border-radius: 18px;
+    overflow: auto;
+    box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.9);
+    background: #fff;
+  }
+  .bulk-table {
+    min-width: 1220px;
+    margin-bottom: 0;
+  }
+  .bulk-table thead th {
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    text-align: center;
+    vertical-align: middle;
+  }
+  .bulk-table thead .store-head {
+    background: #eef4ff;
+    color: #1d4ed8;
+  }
+  .bulk-table thead .store-sub {
+    background: #f8fafc;
+  }
+  .bulk-table tbody td {
+    vertical-align: middle;
+  }
+  .bulk-table tbody td:nth-child(1),
+  .bulk-table tbody td:nth-child(2) {
+    position: sticky;
+    left: 0;
+    background: #fff;
+    z-index: 2;
+  }
+  .bulk-table tbody td:nth-child(2) {
+    left: 90px;
+    min-width: 240px;
+    box-shadow: 8px 0 12px -12px rgba(15, 23, 42, 0.24);
+  }
+  .bulk-table thead tr th:nth-child(1),
+  .bulk-table thead tr th:nth-child(2) {
+    position: sticky;
+    z-index: 4;
+    background: #fff;
+  }
+  .bulk-table thead tr th:nth-child(1) {
+    left: 0;
+    min-width: 90px;
+  }
+  .bulk-table thead tr th:nth-child(2) {
+    left: 90px;
+    min-width: 240px;
+    box-shadow: 8px 0 12px -12px rgba(15, 23, 42, 0.24);
+  }
+  .suggestion-box {
+    position: absolute;
+    top: calc(100% + 0.45rem);
+    left: 0;
+    right: 0;
+    z-index: 20;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .suggestion-box.hidden {
+    display: none;
+  }
+  .suggestion-box .list-group-item {
+    cursor: pointer;
+  }
+  .store-metric {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .case-input {
+    min-width: 74px;
+    max-width: 88px;
+    text-align: center;
+  }
+  @media (max-width: 768px) {
+    .bulk-table tbody td:nth-child(1),
+    .bulk-table tbody td:nth-child(2),
+    .bulk-table thead tr th:nth-child(1),
+    .bulk-table thead tr th:nth-child(2) {
+      position: static;
+      left: auto;
+      box-shadow: none;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4 py-lg-5">
+  <div class="row g-4">
+    <div class="col-12">
+      <div class="card bulk-meta-card">
+        <div class="card-body p-4 p-lg-5">
+          <div class="d-flex flex-column flex-xl-row justify-content-between align-items-start gap-4">
+            <div>
+              <span class="badge bg-primary-subtle text-primary mb-3">Bulk Order</span>
+              <h1 class="h3 fw-bold text-primary mb-1">{{ order_list.name }}</h1>
+              <p class="text-secondary mb-0">Resetting ordered cases only affects this list’s saved case quantities. It does not change stock or monthly-needed values.</p>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <a class="btn btn-outline-secondary" href="{% url 'inventory:bulk_order_index' %}">
+                <i class="bi bi-arrow-left me-1"></i>Back
+              </a>
+              <button type="button" id="refresh-monthly" class="btn btn-outline-primary">
+                <span class="spinner-border spinner-border-sm me-2 d-none" id="refresh-monthly-spin" role="status"></span>
+                <i class="bi bi-lightning-charge me-1"></i>Refresh Monthly Needed
+              </button>
+              <a class="btn btn-outline-success" href="{% url 'inventory:bulk_order_export_excel' order_list.id %}" target="_blank">
+                <i class="bi bi-file-earmark-excel me-1"></i>Excel
+              </a>
+              <a class="btn btn-outline-danger" href="{% url 'inventory:bulk_order_export_pdf' order_list.id %}" target="_blank">
+                <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+              </a>
+              <form method="post" action="{% url 'inventory:bulk_order_reset_cases' order_list.id %}" onsubmit="return confirm('Reset all ordered case quantities on this list to 0?');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-warning">
+                  <i class="bi bi-eraser me-1"></i>Clear Cases
+                </button>
+              </form>
+              <form method="post" action="{% url 'inventory:bulk_order_delete_list' order_list.id %}" onsubmit="return confirm('Delete this bulk order list?');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-secondary">
+                  <i class="bi bi-trash me-1"></i>Delete List
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <label for="bulk-product-query" class="form-label fw-semibold text-uppercase small text-secondary">Add Products</label>
+            <div class="position-relative">
+              <div class="input-group input-group-lg shadow-sm">
+                <span class="input-group-text bg-white border-end-0"><i class="bi bi-upc-scan"></i></span>
+                <input type="text" id="bulk-product-query" class="form-control border-start-0" placeholder="Scan a barcode or type a product name">
+              </div>
+              <div id="bulk-suggestion-box" class="suggestion-box hidden">
+                <div class="list-group shadow" id="bulk-suggestion-list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <div class="bulk-table-wrap">
+        <table class="table table-sm align-middle bulk-table">
+          <thead>
+            <tr>
+              <th rowspan="2">Product #</th>
+              <th rowspan="2">Product</th>
+              <th rowspan="2">Barcode</th>
+              <th rowspan="2">Supplier</th>
+              {% for store in stores %}
+              <th colspan="3" class="store-head">{{ store.number }}</th>
+              {% endfor %}
+              <th rowspan="2">Actions</th>
+            </tr>
+            <tr>
+              {% for store in stores %}
+              <th class="store-sub">Stock</th>
+              <th class="store-sub">Monthly</th>
+              <th class="store-sub">Cases</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody id="bulk-order-body"></tbody>
+        </table>
+      </div>
+      <div id="bulk-order-empty" class="alert alert-light border-start border-4 border-primary-subtle mt-3 d-none">
+        <i class="bi bi-info-circle me-2"></i>Add products to start building this bulk order.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script id="bulk-order-stores" type="application/json">{{ stores_json|safe }}</script>
+<script id="bulk-order-items" type="application/json">{{ items_json|safe }}</script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  const stores = JSON.parse(document.getElementById('bulk-order-stores').textContent || '[]');
+  let items = JSON.parse(document.getElementById('bulk-order-items').textContent || '[]');
+  const tbody = document.getElementById('bulk-order-body');
+  const emptyState = document.getElementById('bulk-order-empty');
+  const queryInput = document.getElementById('bulk-product-query');
+  const suggestionBox = document.getElementById('bulk-suggestion-box');
+  const suggestionList = document.getElementById('bulk-suggestion-list');
+  const refreshBtn = document.getElementById('refresh-monthly');
+  const refreshSpin = document.getElementById('refresh-monthly-spin');
+  const addUrl = "{% url 'inventory:bulk_order_add_item' order_list.id %}";
+  const updateUrlTemplate = "{% url 'inventory:bulk_order_update_item' order_list.id 0 %}";
+  const deleteUrlTemplate = "{% url 'inventory:bulk_order_delete_item' order_list.id 0 %}";
+  const monthlyUrl = "{% url 'inventory:monthly_sales_bulk_api' %}";
+  const csrfToken = document.querySelector('input[name=csrfmiddlewaretoken]')?.value || '';
+  const saveTimers = new Map();
+  let suggestions = [];
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function normalizeItem(item) {
+    item.stores = item.stores || {};
+    stores.forEach((store) => {
+      const key = String(store.id);
+      if (!item.stores[key] && !item.stores[store.id]) {
+        item.stores[key] = { stock: 0, monthly_needed: 0, cases_to_order: 0 };
+      }
+    });
+    return item;
+  }
+
+  function getStoreData(item, storeId) {
+    return item.stores[String(storeId)] || item.stores[storeId] || { stock: 0, monthly_needed: 0, cases_to_order: 0 };
+  }
+
+  function setStoreData(item, storeId, data) {
+    item.stores[String(storeId)] = data;
+  }
+
+  function renderRows() {
+    items = items.map(normalizeItem).sort((a, b) => a.product_name.localeCompare(b.product_name));
+    if (!items.length) {
+      tbody.innerHTML = '';
+      emptyState.classList.remove('d-none');
+      return;
+    }
+    emptyState.classList.add('d-none');
+
+    tbody.innerHTML = items.map((item) => {
+      const storeCells = stores.map((store) => {
+        const data = getStoreData(item, store.id);
+        return `
+          <td class="text-center store-metric">${Number(data.stock || 0).toFixed(2)}</td>
+          <td class="text-center store-metric"><span class="badge text-bg-light border">${Number(data.monthly_needed || 0)}</span></td>
+          <td class="text-center">
+            <input
+              type="number"
+              min="0"
+              class="form-control form-control-sm case-input mx-auto"
+              data-item-id="${item.id}"
+              data-store-id="${store.id}"
+              value="${Number(data.cases_to_order || 0)}"
+            >
+          </td>
+        `;
+      }).join('');
+
+      return `
+        <tr data-item-id="${item.id}">
+          <td>${escapeHtml(item.product_number)}</td>
+          <td>
+            <div class="fw-semibold">${escapeHtml(item.product_name)}</div>
+            <div class="small text-muted">${escapeHtml(item.supplier_name || '—')}</div>
+          </td>
+          <td>${escapeHtml((item.barcodes && item.barcodes[0]) || item.barcode || '—')}</td>
+          <td>${escapeHtml(item.supplier_name || '—')}</td>
+          ${storeCells}
+          <td class="text-center">
+            <button type="button" class="btn btn-sm btn-outline-danger bulk-delete" data-item-id="${item.id}">
+              <i class="bi bi-trash"></i>
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    tbody.querySelectorAll('.case-input').forEach((input) => {
+      input.addEventListener('input', () => {
+        const itemId = Number(input.dataset.itemId);
+        const storeId = Number(input.dataset.storeId);
+        const item = items.find((entry) => entry.id === itemId);
+        if (!item) return;
+        const next = Math.max(0, Number(input.value || 0));
+        const data = getStoreData(item, storeId);
+        data.cases_to_order = next;
+        setStoreData(item, storeId, data);
+        queueSave(itemId);
+      });
+    });
+
+    tbody.querySelectorAll('.bulk-delete').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (!window.confirm('Remove this product from the bulk order?')) return;
+        const itemId = Number(button.dataset.itemId);
+        await fetch(deleteUrlTemplate.replace(/0\/$/, `${itemId}/`), {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrfToken },
+        });
+        items = items.filter((entry) => entry.id !== itemId);
+        renderRows();
+      });
+    });
+  }
+
+  async function saveItem(itemId) {
+    const item = items.find((entry) => entry.id === itemId);
+    if (!item) return;
+    const cases = {};
+    stores.forEach((store) => {
+      cases[store.id] = Number(getStoreData(item, store.id).cases_to_order || 0);
+    });
+
+    const response = await fetch(updateUrlTemplate.replace(/0\/$/, `${itemId}/`), {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrfToken,
+      },
+      body: JSON.stringify({ cases }),
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    if (data.item) {
+      const index = items.findIndex((entry) => entry.id === itemId);
+      if (index >= 0) {
+        items[index] = normalizeItem(data.item);
+        renderRows();
+      }
+    }
+  }
+
+  function queueSave(itemId) {
+    window.clearTimeout(saveTimers.get(itemId));
+    saveTimers.set(itemId, window.setTimeout(() => saveItem(itemId), 300));
+  }
+
+  function renderSuggestions(results) {
+    suggestions = results || [];
+    if (!suggestions.length) {
+      suggestionBox.classList.add('hidden');
+      suggestionList.innerHTML = '';
+      return;
+    }
+    suggestionList.innerHTML = suggestions.map((item) => `
+      <button type="button" class="list-group-item list-group-item-action" data-product-number="${item.number}">
+        <div class="fw-semibold">${escapeHtml(item.name)}</div>
+        <div class="small text-muted">${escapeHtml(item.barcode || 'No barcode')} • ${escapeHtml(item.supplier_name || 'No supplier')}</div>
+      </button>
+    `).join('');
+    suggestionBox.classList.remove('hidden');
+
+    suggestionList.querySelectorAll('[data-product-number]').forEach((button) => {
+      button.addEventListener('click', () => {
+        addProduct(Number(button.dataset.productNumber));
+      });
+    });
+  }
+
+  async function searchProducts(query) {
+    if (!query) {
+      renderSuggestions([]);
+      return;
+    }
+    const response = await fetch(`{% url 'inventory:product_search_api' %}?q=${encodeURIComponent(query)}&page_size=8`);
+    if (!response.ok) return;
+    const data = await response.json();
+    renderSuggestions([...(data.matches || []), ...(data.suggestions || [])]);
+  }
+
+  async function addProduct(productNumber) {
+    const response = await fetch(addUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrfToken,
+      },
+      body: JSON.stringify({ product_number: productNumber }),
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    if (data.item) {
+      const existing = items.findIndex((entry) => entry.id === data.item.id);
+      if (existing >= 0) {
+        items[existing] = normalizeItem(data.item);
+      } else {
+        items.push(normalizeItem(data.item));
+      }
+      renderRows();
+      renderSuggestions([]);
+      queryInput.value = '';
+      await refreshMonthly(true, [productNumber]);
+    }
+  }
+
+  async function refreshMonthly(force, onlyProducts) {
+    const productNumbers = onlyProducts || items.map((item) => item.product_number);
+    if (!productNumbers.length) return;
+    refreshSpin.classList.remove('d-none');
+    refreshBtn.disabled = true;
+    const params = new URLSearchParams();
+    params.set('products', productNumbers.join(','));
+    params.set('stores', stores.map((store) => store.id).join(','));
+    if (force) params.set('force', '1');
+
+    try {
+      const response = await fetch(`${monthlyUrl}?${params.toString()}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const sales = data.sales || {};
+      items.forEach((item) => {
+        const perProduct = sales[String(item.product_number)] || sales[item.product_number] || {};
+        stores.forEach((store) => {
+          const current = getStoreData(item, store.id);
+          current.monthly_needed = Number(perProduct[String(store.id)] || perProduct[store.id] || 0);
+          setStoreData(item, store.id, current);
+        });
+      });
+      renderRows();
+    } finally {
+      refreshBtn.disabled = false;
+      refreshSpin.classList.add('d-none');
+    }
+  }
+
+  queryInput.addEventListener('input', () => {
+    window.clearTimeout(queryInput._searchTimer);
+    queryInput._searchTimer = window.setTimeout(() => searchProducts(queryInput.value.trim()), 180);
+  });
+
+  queryInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (suggestions.length) {
+        addProduct(Number(suggestions[0].number));
+      }
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!suggestionBox.contains(event.target) && event.target !== queryInput) {
+      suggestionBox.classList.add('hidden');
+    }
+  });
+
+  refreshBtn.addEventListener('click', () => refreshMonthly(true));
+
+  renderRows();
+  if (items.length) {
+    refreshMonthly(false);
+  }
+})();
+</script>
+{% endblock %}

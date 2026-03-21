@@ -13,7 +13,7 @@ import requests
 from django.core.management import call_command
 from django.db import OperationalError, transaction
 from django.db.models import Q, Prefetch, Count, F
-from django.http import JsonResponse, HttpResponseNotModified
+from django.http import JsonResponse, HttpResponse, HttpResponseNotModified
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 from django.contrib.auth.decorators import login_required, user_passes_test
@@ -22,7 +22,16 @@ from django_ratelimit.decorators import ratelimit
 from .korona import fetch_product_stocks
 
 logger = logging.getLogger(__name__)
-from .models import Product, ProductStock, Store, ProductBarcode
+from .models import (
+    BulkOrderItem,
+    BulkOrderList,
+    BulkOrderStoreCase,
+    MonthlySales,
+    Product,
+    ProductBarcode,
+    ProductStock,
+    Store,
+)
 from django.utils import timezone
 from django.contrib import messages
 from django.contrib.auth import get_user_model
@@ -1419,6 +1428,454 @@ def monthly_sales_bulk_api(request):
     resp["ETag"] = etag
     resp["Cache-Control"] = "no-store" if force_refresh else "private, max-age=60, stale-while-revalidate=120"
     return resp
+
+
+def _active_bulk_order_stores() -> list[Store]:
+    return list(Store.objects.filter(active=True).order_by("number", "name"))
+
+
+def _ensure_bulk_order_store_cases(order_list: BulkOrderList, stores: list[Store]) -> None:
+    item_ids = list(order_list.items.values_list("id", flat=True))
+    if not item_ids or not stores:
+        return
+
+    store_ids = [store.id for store in stores]
+    existing = set(
+        BulkOrderStoreCase.objects.filter(item_id__in=item_ids, store_id__in=store_ids)
+        .values_list("item_id", "store_id")
+    )
+    missing = [
+        BulkOrderStoreCase(item_id=item_id, store_id=store.id, cases_to_order=0)
+        for item_id in item_ids
+        for store in stores
+        if (item_id, store.id) not in existing
+    ]
+    if missing:
+        BulkOrderStoreCase.objects.bulk_create(missing, ignore_conflicts=True)
+
+
+def _serialize_bulk_order_items(order_list: BulkOrderList, stores: list[Store]) -> list[dict]:
+    item_qs = list(
+        order_list.items.select_related("product")
+        .prefetch_related("product__barcodes")
+        .order_by("product__name")
+    )
+    if not item_qs:
+        return []
+
+    product_ids = [item.product_id for item in item_qs]
+    store_ids = [store.id for store in stores]
+
+    stock_map = {
+        (int(product_id), int(store_id)): float(actual)
+        for product_id, store_id, actual in ProductStock.objects.filter(
+            product_id__in=product_ids,
+            store_id__in=store_ids,
+        ).values_list("product_id", "store_id", "actual")
+    }
+    monthly_map = {
+        (int(product_id), int(store_id)): int(quantity_sold)
+        for product_id, store_id, quantity_sold in MonthlySales.objects.filter(
+            product_id__in=product_ids,
+            store_id__in=store_ids,
+        ).values_list("product_id", "store_id", "quantity_sold")
+    }
+    case_map = {
+        (int(item_id), int(store_id)): int(cases_to_order)
+        for item_id, store_id, cases_to_order in BulkOrderStoreCase.objects.filter(
+            item_id__in=[item.id for item in item_qs],
+            store_id__in=store_ids,
+        ).values_list("item_id", "store_id", "cases_to_order")
+    }
+
+    rows: list[dict] = []
+    for item in item_qs:
+        barcodes = []
+        if item.product.barcode:
+            barcodes.append(item.product.barcode)
+        for barcode in item.product.barcodes.all():
+            if barcode.code and barcode.code not in barcodes:
+                barcodes.append(barcode.code)
+
+        per_store = {}
+        for store in stores:
+            per_store[store.id] = {
+                "stock": stock_map.get((item.product_id, store.id), 0.0),
+                "monthly_needed": monthly_map.get((item.product_id, store.id), 0),
+                "cases_to_order": case_map.get((item.id, store.id), 0),
+            }
+
+        rows.append(
+            {
+                "id": item.id,
+                "product_number": item.product.number,
+                "product_name": item.product.name,
+                "barcode": item.product.barcode,
+                "barcodes": barcodes,
+                "supplier_name": item.product.supplier_name,
+                "stores": per_store,
+            }
+        )
+    return rows
+
+
+@login_required
+@user_passes_test(_staff_required)
+def bulk_order_index(request):
+    """Admin-only landing page for saved bulk order lists."""
+    if request.method == "POST":
+        name = (request.POST.get("name") or "").strip()
+        if not name:
+            messages.error(request, "Bulk order name is required.")
+        else:
+            order_list, created = BulkOrderList.objects.get_or_create(
+                name=name,
+                defaults={"created_by": request.user},
+            )
+            if created:
+                messages.success(request, f"Bulk order '{order_list.name}' created.")
+            else:
+                messages.info(request, f"Opened existing bulk order '{order_list.name}'.")
+            from django.shortcuts import redirect
+
+            return redirect("inventory:bulk_order_detail", list_id=order_list.id)
+
+    lists = BulkOrderList.objects.annotate(item_count=Count("items")).order_by("name")
+    return render(
+        request,
+        "inventory/bulk_order_index.html",
+        {
+            "active_tab": "bulk_orders",
+            "bulk_orders": lists,
+        },
+    )
+
+
+@login_required
+@user_passes_test(_staff_required)
+def bulk_order_detail(request, list_id: int):
+    """Admin-only detail page for a saved bulk order list."""
+    from django.shortcuts import get_object_or_404
+
+    order_list = get_object_or_404(BulkOrderList, pk=list_id)
+    stores = _active_bulk_order_stores()
+    _ensure_bulk_order_store_cases(order_list, stores)
+
+    return render(
+        request,
+        "inventory/bulk_order_detail.html",
+        {
+            "active_tab": "bulk_orders",
+            "order_list": order_list,
+            "stores": stores,
+            "stores_json": json.dumps([{"id": store.id, "name": store.name, "number": store.number} for store in stores]),
+            "items_json": json.dumps(_serialize_bulk_order_items(order_list, stores)),
+        },
+    )
+
+
+@login_required
+@user_passes_test(_staff_required)
+def bulk_order_add_item_api(request, list_id: int):
+    """Add a product row to a bulk order list."""
+    import json as json_lib
+    from django.shortcuts import get_object_or_404
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    order_list = get_object_or_404(BulkOrderList, pk=list_id)
+    try:
+        payload = json_lib.loads(request.body or "{}")
+    except json_lib.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    product_number = payload.get("product_number")
+    if not product_number:
+        return JsonResponse({"error": "Product number is required"}, status=400)
+
+    try:
+        product = Product.objects.get(number=int(product_number))
+    except (Product.DoesNotExist, ValueError):
+        return JsonResponse({"error": "Product not found"}, status=404)
+
+    item, created = BulkOrderItem.objects.get_or_create(
+        bulk_order=order_list,
+        product=product,
+    )
+    stores = _active_bulk_order_stores()
+    if stores:
+        BulkOrderStoreCase.objects.bulk_create(
+            [
+                BulkOrderStoreCase(item=item, store=store, cases_to_order=0)
+                for store in stores
+            ],
+            ignore_conflicts=True,
+        )
+
+    row = _serialize_bulk_order_items(order_list, stores)
+    item_payload = next((entry for entry in row if entry["id"] == item.id), None)
+    return JsonResponse({"ok": True, "created": created, "item": item_payload})
+
+
+@login_required
+@user_passes_test(_staff_required)
+def bulk_order_update_item_api(request, list_id: int, item_id: int):
+    """Update per-store case quantities for a bulk-order row."""
+    import json as json_lib
+    from django.shortcuts import get_object_or_404
+
+    if request.method != "PATCH":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    order_list = get_object_or_404(BulkOrderList, pk=list_id)
+    item = get_object_or_404(BulkOrderItem, pk=item_id, bulk_order=order_list)
+
+    try:
+        payload = json_lib.loads(request.body or "{}")
+    except json_lib.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    cases = payload.get("cases") or {}
+    if not isinstance(cases, dict):
+        return JsonResponse({"error": "Invalid cases payload"}, status=400)
+
+    store_ids = []
+    normalized: dict[int, int] = {}
+    allowed_store_ids = {store.id for store in _active_bulk_order_stores()}
+    for key, value in cases.items():
+        try:
+            store_id = int(key)
+            qty = max(0, int(value or 0))
+        except (TypeError, ValueError):
+            continue
+        if store_id not in allowed_store_ids:
+            continue
+        store_ids.append(store_id)
+        normalized[store_id] = qty
+
+    existing = {
+        int(entry.store_id): entry
+        for entry in BulkOrderStoreCase.objects.filter(item=item, store_id__in=store_ids)
+    }
+    to_create = []
+    to_update = []
+    for store_id, qty in normalized.items():
+        entry = existing.get(store_id)
+        if entry is None:
+            to_create.append(BulkOrderStoreCase(item=item, store_id=store_id, cases_to_order=qty))
+            continue
+        if entry.cases_to_order != qty:
+            entry.cases_to_order = qty
+            entry.updated_at = timezone.now()
+            to_update.append(entry)
+
+    if to_create:
+        BulkOrderStoreCase.objects.bulk_create(to_create, ignore_conflicts=True)
+    if to_update:
+        BulkOrderStoreCase.objects.bulk_update(to_update, ["cases_to_order", "updated_at"])
+
+    stores = _active_bulk_order_stores()
+    item_payload = next(
+        (entry for entry in _serialize_bulk_order_items(order_list, stores) if entry["id"] == item.id),
+        None,
+    )
+    return JsonResponse({"ok": True, "item": item_payload})
+
+
+@login_required
+@user_passes_test(_staff_required)
+def bulk_order_delete_item_api(request, list_id: int, item_id: int):
+    """Delete one product row from a bulk order list."""
+    from django.shortcuts import get_object_or_404
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    order_list = get_object_or_404(BulkOrderList, pk=list_id)
+    item = get_object_or_404(BulkOrderItem, pk=item_id, bulk_order=order_list)
+    item.delete()
+    return JsonResponse({"ok": True})
+
+
+@login_required
+@user_passes_test(_staff_required)
+def bulk_order_reset_cases(request, list_id: int):
+    """Reset saved order-case quantities for all rows in a bulk order list."""
+    from django.shortcuts import get_object_or_404, redirect
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    order_list = get_object_or_404(BulkOrderList, pk=list_id)
+    BulkOrderStoreCase.objects.filter(item__bulk_order=order_list).update(cases_to_order=0)
+    messages.success(request, "Ordered cases were reset to 0 for every store on this bulk order.")
+    return redirect("inventory:bulk_order_detail", list_id=order_list.id)
+
+
+@login_required
+@user_passes_test(_staff_required)
+def bulk_order_delete_list(request, list_id: int):
+    """Delete a saved bulk order list."""
+    from django.shortcuts import get_object_or_404, redirect
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    order_list = get_object_or_404(BulkOrderList, pk=list_id)
+    name = order_list.name
+    order_list.delete()
+    messages.success(request, f"Bulk order '{name}' deleted.")
+    return redirect("inventory:bulk_order_index")
+
+
+@login_required
+@user_passes_test(_staff_required)
+def bulk_order_export_excel(request, list_id: int):
+    """Export one bulk order list to Excel."""
+    from django.shortcuts import get_object_or_404
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    order_list = get_object_or_404(BulkOrderList, pk=list_id)
+    stores = _active_bulk_order_stores()
+    rows = _serialize_bulk_order_items(order_list, stores)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Bulk Order"
+
+    headers = ["Product #", "Product Name", "Barcode", "Supplier"]
+    for store in stores:
+        headers.extend(
+            [
+                f"{store.number} Stock",
+                f"{store.number} Monthly",
+                f"{store.number} Cases",
+            ]
+        )
+
+    max_cols = max(1, len(headers))
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_cols)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max_cols)
+    ws.cell(row=1, column=1, value=f"Bulk Order - {order_list.name}").font = Font(bold=True, size=14)
+    ws.cell(row=2, column=1, value=f"Generated on {timezone.now().astimezone().strftime('%Y-%m-%d %H:%M')}").font = Font(color="666666")
+    ws.append([None] * max_cols)
+    ws.append(headers)
+
+    header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    for cell in ws[4]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for row in rows:
+        values = [
+            row["product_number"],
+            row["product_name"],
+            row["barcode"] or "",
+            row["supplier_name"] or "",
+        ]
+        for store in stores:
+            store_values = row["stores"].get(store.id, {})
+            values.extend(
+                [
+                    float(store_values.get("stock", 0)),
+                    int(store_values.get("monthly_needed", 0)),
+                    int(store_values.get("cases_to_order", 0)),
+                ]
+            )
+        ws.append(values)
+
+    ws.freeze_panes = ws["A5"]
+    widths = {1: 12, 2: 28, 3: 16, 4: 22}
+    for idx in range(1, max_cols + 1):
+        ws.column_dimensions[get_column_letter(idx)].width = widths.get(idx, 12)
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    filename = f"{order_list.name.replace(' ', '_')}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    wb.save(response)
+    return response
+
+
+@login_required
+@user_passes_test(_staff_required)
+def bulk_order_export_pdf(request, list_id: int):
+    """Export one bulk order list to PDF."""
+    from io import BytesIO
+
+    from django.shortcuts import get_object_or_404
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import landscape, letter
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    order_list = get_object_or_404(BulkOrderList, pk=list_id)
+    stores = _active_bulk_order_stores()
+    rows = _serialize_bulk_order_items(order_list, stores)
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), topMargin=0.4 * inch)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("Title", parent=styles["Heading2"], textColor=colors.HexColor("#2563EB"))
+    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontSize=8, leading=10, wordWrap="CJK")
+
+    def P(text):
+        return Paragraph(str(text) if text not in (None, "") else "—", cell_style)
+
+    table_headers = ["Product #", "Product Name", "Barcode", "Supplier"] + [store.number for store in stores]
+    table_rows = [table_headers]
+    for row in rows:
+        table_row = [
+            P(row["product_number"]),
+            P(row["product_name"]),
+            P(row["barcode"] or "—"),
+            P(row["supplier_name"] or "—"),
+        ]
+        for store in stores:
+            store_values = row["stores"].get(store.id, {})
+            cell_text = (
+                f"Stock: {float(store_values.get('stock', 0)):.2f}<br/>"
+                f"Monthly: {int(store_values.get('monthly_needed', 0))}<br/>"
+                f"Cases: {int(store_values.get('cases_to_order', 0))}"
+            )
+            table_row.append(P(cell_text))
+        table_rows.append(table_row)
+
+    col_widths = [0.8 * inch, 2.2 * inch, 1.2 * inch, 1.6 * inch] + [1.1 * inch for _ in stores]
+    table = Table(table_rows, colWidths=col_widths, repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2563EB")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.grey),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F3F4F6")]),
+            ]
+        )
+    )
+
+    elements = [
+        Paragraph(f"Bulk Order - {order_list.name}", title_style),
+        Paragraph(f"Generated on {timezone.now().astimezone().strftime('%Y-%m-%d %H:%M')}", styles["Normal"]),
+        Spacer(1, 0.15 * inch),
+        table,
+    ]
+    doc.build(elements)
+
+    buffer.seek(0)
+    response = HttpResponse(buffer.read(), content_type="application/pdf")
+    filename = f"{order_list.name.replace(' ', '_')}.pdf"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 @login_required

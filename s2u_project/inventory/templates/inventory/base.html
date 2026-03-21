@@ -50,6 +50,11 @@
                 </li>
                 {% if request.user.is_staff %}
                 <li class="nav-item">
+                    <a class="nav-link {% if active_tab == 'bulk_orders' %}active{% endif %}" href="{% url 'inventory:bulk_order_index' %}">
+                        <i class="bi bi-boxes me-1"></i>Bulk Orders
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link {% if active_tab == 'users' %}active{% endif %}" href="{% url 'inventory:user_manage' %}">
                         <i class="bi bi-people me-1"></i>Users
                     </a>

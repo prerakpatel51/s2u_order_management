@@ -3,7 +3,17 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.core.exceptions import PermissionDenied
 
-from .models import Product, ProductStock, Store, WeeklyOrderItem, WeeklyOrderList, MonthlySales
+from .models import (
+    BulkOrderItem,
+    BulkOrderList,
+    BulkOrderStoreCase,
+    MonthlySales,
+    Product,
+    ProductStock,
+    Store,
+    WeeklyOrderItem,
+    WeeklyOrderList,
+)
 
 
 @admin.register(Store)
@@ -65,6 +75,32 @@ class MonthlySalesAdmin(admin.ModelAdmin):
     list_filter = ("store", "calculated_at")
     search_fields = ("product__name", "product__number", "store__name", "store__number")
     readonly_fields = ("calculated_at",)
+
+
+class BulkOrderStoreCaseInline(admin.TabularInline):
+    model = BulkOrderStoreCase
+    extra = 0
+
+
+@admin.register(BulkOrderList)
+class BulkOrderListAdmin(admin.ModelAdmin):
+    list_display = ("name", "created_by", "created_at", "updated_at")
+    search_fields = ("name", "created_by__username")
+
+
+@admin.register(BulkOrderItem)
+class BulkOrderItemAdmin(admin.ModelAdmin):
+    list_display = ("bulk_order", "product", "added_at")
+    search_fields = ("bulk_order__name", "product__name", "product__number")
+    list_filter = ("bulk_order",)
+    inlines = [BulkOrderStoreCaseInline]
+
+
+@admin.register(BulkOrderStoreCase)
+class BulkOrderStoreCaseAdmin(admin.ModelAdmin):
+    list_display = ("item", "store", "cases_to_order", "updated_at")
+    search_fields = ("item__bulk_order__name", "item__product__name", "store__name", "store__number")
+    list_filter = ("store",)
 
 
 # --- Restrict user deletion in Django admin: only superusers may delete users ---

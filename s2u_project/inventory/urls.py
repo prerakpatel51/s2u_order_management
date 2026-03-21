@@ -6,6 +6,15 @@ app_name = "inventory"
 
 urlpatterns = [
     path("", views.home, name="home"),
+    path("bulk-orders/", views.bulk_order_index, name="bulk_order_index"),
+    path("bulk-orders/<int:list_id>/", views.bulk_order_detail, name="bulk_order_detail"),
+    path("bulk-orders/<int:list_id>/add/", views.bulk_order_add_item_api, name="bulk_order_add_item"),
+    path("bulk-orders/<int:list_id>/item/<int:item_id>/", views.bulk_order_update_item_api, name="bulk_order_update_item"),
+    path("bulk-orders/<int:list_id>/item/<int:item_id>/delete/", views.bulk_order_delete_item_api, name="bulk_order_delete_item"),
+    path("bulk-orders/<int:list_id>/reset-cases/", views.bulk_order_reset_cases, name="bulk_order_reset_cases"),
+    path("bulk-orders/<int:list_id>/delete/", views.bulk_order_delete_list, name="bulk_order_delete_list"),
+    path("bulk-orders/<int:list_id>/export/excel/", views.bulk_order_export_excel, name="bulk_order_export_excel"),
+    path("bulk-orders/<int:list_id>/export/pdf/", views.bulk_order_export_pdf, name="bulk_order_export_pdf"),
     path("inventory/", views.product_search, name="product_search"),
     path("api/search/", views.product_search_api, name="product_search_api"),
     path("api/stock/", views.product_stock_api, name="product_stock_api"),
