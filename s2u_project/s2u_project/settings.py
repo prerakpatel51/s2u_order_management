@@ -104,6 +104,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "inventory.context_processors.analytics",
             ],
         },
     },
@@ -179,6 +180,12 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 AUTHENTICATION_BACKENDS = [
     "s2u_project.auth_backends.CaseInsensitiveModelBackend",
 ]
+
+# Optional Google Analytics / Search Console integration.
+# Set these in production env vars to enable tracking and site verification.
+GOOGLE_ANALYTICS_ID = os.environ.get("GOOGLE_ANALYTICS_ID", "").strip()
+GOOGLE_SITE_VERIFICATION = os.environ.get("GOOGLE_SITE_VERIFICATION", "").strip()
+
 # Security settings (production only)
 if IS_PRODUCTION:
     SECURE_SSL_REDIRECT = True
@@ -214,11 +221,20 @@ if IS_PRODUCTION:
 
     # Content Security Policy
     CSP_DEFAULT_SRC = ("'self'",)
-    CSP_SCRIPT_SRC = ("'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net")
+    CSP_SCRIPT_SRC = (
+        "'self'",
+        "'unsafe-inline'",
+        "https://cdn.jsdelivr.net",
+        "https://www.googletagmanager.com",
+    )
     CSP_STYLE_SRC = ("'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net")
     CSP_IMG_SRC = ("'self'", "data:", "https:")
     CSP_FONT_SRC = ("'self'", "data:", "https://cdn.jsdelivr.net")
-    CSP_CONNECT_SRC = ("'self'",)
+    CSP_CONNECT_SRC = (
+        "'self'",
+        "https://www.google-analytics.com",
+        "https://region1.google-analytics.com",
+    )
     CSP_FRAME_ANCESTORS = ("'none'",)
     CSP_BASE_URI = ("'self'",)
     CSP_FORM_ACTION = ("'self'",)
